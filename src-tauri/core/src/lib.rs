@@ -2,6 +2,7 @@
 
 pub mod error;
 pub mod model;
+pub mod slug;
 
 pub use error::{CoreError, Result};
 pub use model::*;
