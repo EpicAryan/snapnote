@@ -4,6 +4,7 @@ pub mod captured_at;
 pub mod error;
 pub mod model;
 pub mod slug;
+pub mod store;
 
 pub use error::{CoreError, Result};
 pub use model::*;
