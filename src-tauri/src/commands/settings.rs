@@ -17,7 +17,13 @@ pub fn set_setting(app: AppHandle, state: State<'_, AppState>, key: String, valu
     Ok(())
 }
 
-/// Settings that change live behaviour. Task 18 adds hotkey and autostart, Task 19 the watcher.
+/// Settings that change live behaviour. Task 19 adds the watch folder arm.
 pub fn apply_side_effects(app: &AppHandle, key: &str, value: &str) {
-    let _ = (app, key, value);
+    match key {
+        "label_hotkey" => {
+            let _ = crate::hotkey::register_label_hotkey(app, value);
+        }
+        "autostart" => crate::autostart::apply(app, value == "true"),
+        _ => {}
+    }
 }

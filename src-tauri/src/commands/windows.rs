@@ -15,3 +15,8 @@ pub fn open_popup_for(app: AppHandle, id: i64) {
 pub fn hide_popup(app: AppHandle) {
     windows::hide_popup(&app);
 }
+
+#[tauri::command]
+pub fn label_last_screenshot(app: AppHandle) {
+    windows::label_current_or_newest(&app);
+}

@@ -1,6 +1,9 @@
+mod autostart;
 mod commands;
 mod error;
+mod hotkey;
 mod state;
+mod tray;
 mod watch_folder;
 mod windows;
 
@@ -11,8 +14,13 @@ use tauri::Manager;
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            windows::show_library(app);
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // Closing any window hides it; the app lives in the tray. Quit is in the tray menu.
@@ -40,6 +48,10 @@ pub fn run() {
                 hotkey_error: Mutex::new(None),
             });
             windows::restore_library_bounds(app.handle());
+            tray::build(app.handle())?;
+            let startup_settings = app.state::<AppState>().store()?.get_settings()?;
+            let _ = hotkey::register_label_hotkey(app.handle(), &startup_settings.label_hotkey);
+            autostart::apply(app.handle(), startup_settings.autostart);
             // In `tauri dev` there is no tray yet (Task 18) and all windows start hidden,
             // so show the library so there is something to look at.
             #[cfg(debug_assertions)]
@@ -63,6 +75,7 @@ pub fn run() {
             commands::windows::hide_toast,
             commands::windows::open_popup_for,
             commands::windows::hide_popup,
+            commands::windows::label_last_screenshot,
         ])
         .run(tauri::generate_context!())
         .expect("error while running snapnote");
