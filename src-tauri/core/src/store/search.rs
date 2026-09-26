@@ -22,7 +22,7 @@ pub fn fts_query(q: &str) -> Option<String> {
 impl Store {
     pub fn list_screenshots(&self, q: &ListQuery) -> Result<Vec<ScreenshotCard>> {
         let mut sql = String::from(
-            "SELECT s.id, s.path, s.original_name, s.captured_at, s.label, s.destination_id, d.name, s.status, s.pending_move_to
+            "SELECT s.id, s.path, s.original_name, s.captured_at, s.label, s.notes, s.destination_id, d.name, s.status, s.pending_move_to
              FROM screenshots s JOIN destinations d ON d.id = s.destination_id WHERE 1 = 1",
         );
         let mut args: Vec<Value> = Vec::new();
@@ -53,10 +53,11 @@ impl Store {
                 original_name: r.get(2)?,
                 captured_at: r.get(3)?,
                 label: r.get(4)?,
-                destination_id: r.get(5)?,
-                destination_name: r.get(6)?,
-                status: Status::parse(&r.get::<_, String>(7)?),
-                pending_move_to: r.get(8)?,
+                notes: r.get(5)?,
+                destination_id: r.get(6)?,
+                destination_name: r.get(7)?,
+                status: Status::parse(&r.get::<_, String>(8)?),
+                pending_move_to: r.get(9)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -110,6 +111,7 @@ mod tests {
         let cards = s.list_screenshots(&ListQuery::default()).unwrap();
         assert_eq!(names(&cards), ["a.png", "b.png", "c.png"]);
         assert_eq!(cards[0].destination_name, "Embee");
+        assert_eq!(cards[0].notes, "DB timeout while syncing", "cards carry notes so a notes match is visible in the grid");
     }
 
     #[test]

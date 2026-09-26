@@ -1,6 +1,6 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { open as openDialog } from '@tauri-apps/plugin-dialog'
+import { ask, open as openDialog } from '@tauri-apps/plugin-dialog'
 import type { Commands, Events } from './commands'
 import { DEFAULT_QUERY } from './types'
 
@@ -15,6 +15,10 @@ export const tauriCommands: Commands = {
   revealFile: (id) => invoke('reveal_file', { id }),
   removeFromLibrary: (id) => invoke('remove_from_library', { id }),
   deleteFile: (id) => invoke('delete_file', { id }),
+  copyImage: (id) => invoke('copy_image', { id }),
+  pasteClipboardImage: () => invoke('paste_clipboard_image'),
+  reconcileNow: () => invoke('reconcile_now'),
+  confirm: (message, title) => ask(message, { title: title ?? 'snapnote', kind: 'warning' }),
 
   listDestinations: () => invoke('list_destinations'),
   createDestination: (name, path) => invoke('create_destination', { name, path }),

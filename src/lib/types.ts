@@ -31,6 +31,7 @@ export interface ScreenshotCard {
   original_name: string
   captured_at: string
   label: string
+  notes: string
   destination_id: number
   destination_name: string
   status: Status

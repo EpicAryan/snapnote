@@ -8,7 +8,7 @@ import { errorMessage } from '../../lib/types'
 import { forgetThumbnail } from '../../lib/useThumbnail'
 import { describeResult } from '../popup/Popup'
 
-export function SidePanel({ id, onChanged }: { id: number | null; onChanged(): void }) {
+export function SidePanel({ id, onChanged, onClose }: { id: number | null; onChanged(): void; onClose?(): void }) {
   const cmd = useCommands()
   const [shot, setShot] = useState<Screenshot | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
@@ -56,6 +56,10 @@ export function SidePanel({ id, onChanged }: { id: number | null; onChanged(): v
 
   return (
     <div className="flex flex-col gap-3 p-3 text-sm">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">Details</span>
+        <button aria-label="Close details" title="Close (Esc)" className="rounded px-2 py-0.5 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100" onClick={onClose}>✕</button>
+      </div>
       <div className="relative overflow-hidden rounded bg-neutral-900">
         {preview ? <img src={preview} alt="Screenshot preview" className="w-full object-contain" /> : <div className="aspect-video" />}
         {shot.status === 'missing' && <span className="absolute right-2 top-2 rounded bg-red-700 px-1.5 text-xs">Missing</span>}
@@ -79,6 +83,7 @@ export function SidePanel({ id, onChanged }: { id: number | null; onChanged(): v
       <div className="flex flex-wrap gap-2">
         {shot.status === 'present' && <button className={btn} onClick={() => void cmd.openFile(shot.id)}>Open</button>}
         {shot.status === 'present' && <button className={btn} onClick={() => void cmd.revealFile(shot.id)}>Reveal in Explorer</button>}
+        {shot.status === 'present' && <button className={btn} onClick={() => void cmd.copyImage(shot.id).then(() => setMsg({ text: 'Copied image to the clipboard', tone: 'ok' }), (e) => setMsg({ text: errorMessage(e), tone: 'err' }))}>Copy image</button>}
         {shot.pending_move_to != null && <button className={`${btn} bg-amber-800`} onClick={() => void after(cmd.retryMove(shot.id))}>Retry move</button>}
         <ConfirmButton className={btn} label="Remove from library" confirmLabel="Confirm remove" onConfirm={() => { void cmd.removeFromLibrary(shot.id).then(() => { setShot(null); onChanged() }) }} />
         {shot.status === 'present' && <ConfirmButton className={btn} label="Delete file" confirmLabel="Confirm delete" onConfirm={() => { void cmd.deleteFile(shot.id).then(() => { setShot(null); onChanged() }) }} />}

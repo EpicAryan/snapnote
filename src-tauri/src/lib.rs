@@ -2,6 +2,7 @@ mod autostart;
 mod commands;
 mod error;
 mod hotkey;
+mod reconcile;
 mod startup;
 mod state;
 mod tray;
@@ -23,8 +24,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
                 // Closing any window hides it; the app lives in the tray. Quit is in the tray menu.
                 api.prevent_close();
                 if window.label() == windows::LIBRARY {
@@ -32,6 +34,11 @@ pub fn run() {
                 }
                 let _ = window.hide();
             }
+            // Coming back to the library (typically from Explorer) re-checks files on disk.
+            tauri::WindowEvent::Focused(true) if window.label() == windows::LIBRARY => {
+                reconcile::spawn(window.app_handle());
+            }
+            _ => {}
         })
         .setup(|app| {
             let data_dir = app.path().local_data_dir()?.join("snapnote");
@@ -72,31 +79,8 @@ pub fn run() {
             autostart::apply(app.handle(), settings.autostart);
             watch::start(app.handle())?;
 
-            // Flag rows whose files vanished while we were not running. Off the main thread, and
-            // the existence checks (thousands of paths, possibly on OneDrive) run without the
-            // store lock so commands keep working meanwhile.
-            let handle = app.handle().clone();
-            std::thread::spawn(move || {
-                let state = handle.state::<AppState>();
-                let rows = state.store().and_then(|store| Ok(store.all_rows_status()?));
-                let rows = match rows {
-                    Ok(r) => r,
-                    Err(e) => {
-                        eprintln!("reconcile: {e}");
-                        return;
-                    }
-                };
-                let changes = snapnote_core::reconcile::plan(&rows, |p| p.exists());
-                if changes.is_empty() {
-                    return;
-                }
-                let applied = state.store().and_then(|store| Ok(snapnote_core::reconcile::apply(&store, &changes)?));
-                match applied {
-                    Ok(n) if n > 0 => eprintln!("reconcile: {n} file(s) now missing"),
-                    Ok(_) => {}
-                    Err(e) => eprintln!("reconcile: {e}"),
-                }
-            });
+            // Flag rows whose files vanished while we were not running (off the main thread).
+            reconcile::spawn(app.handle());
 
             if startup::should_show_library(settings.first_run_done, cfg!(debug_assertions)) {
                 windows::show_library(app.handle());
@@ -131,6 +115,9 @@ pub fn run() {
             commands::screenshots::delete_file,
             commands::system::import_existing,
             commands::system::clear_thumbnail_cache,
+            commands::screenshots::copy_image,
+            commands::system::paste_clipboard_image,
+            commands::system::reconcile_now,
         ])
         .build(tauri::generate_context!())
         .expect("error while building snapnote")

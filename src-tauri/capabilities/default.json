@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "snapnote windows",
   "windows": ["library", "popup", "toast"],
-  "permissions": ["core:default", "dialog:allow-open"]
+  "permissions": ["core:default", "dialog:allow-open", "dialog:allow-ask"]
 }

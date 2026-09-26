@@ -24,6 +24,8 @@ export interface MockHandle {
   calls: unknown[][]
   state: { screenshots: Screenshot[]; destinations: Destination[]; settings: Settings; folders: Set<string> }
   setPickFolderResult(v: string | null): void
+  setConfirmResult(v: boolean): void
+  setClipboardHasImage(v: boolean): void
 }
 
 export interface MockSeed {
@@ -73,6 +75,8 @@ export function createMockCommands(seed: MockSeed = {}): MockHandle {
   let nextId = screenshots.length + 1
   let nextDest = 2
   let pickFolderResult: string | null = 'D:\\ClientX'
+  let confirmResult = true
+  let clipboardHasImage = true
   void nextId
 
   const emit: MockHandle['emit'] = (event, payload) => {
@@ -95,6 +99,7 @@ export function createMockCommands(seed: MockSeed = {}): MockHandle {
     original_name: s.original_name,
     captured_at: s.captured_at,
     label: s.label,
+    notes: s.notes,
     destination_id: s.destination_id,
     destination_name: findDest(s.destination_id).name,
     status: s.status,
@@ -191,6 +196,23 @@ export function createMockCommands(seed: MockSeed = {}): MockHandle {
       calls.push(['deleteFile', id])
       await commands.removeFromLibrary(id)
     },
+    async copyImage(id) {
+      find(id)
+      calls.push(['copyImage', id])
+    },
+    async pasteClipboardImage() {
+      calls.push(['pasteClipboardImage'])
+      if (!clipboardHasImage) throw err('InvalidInput', 'No image on the clipboard')
+      return `${WATCH}\\Screenshot 2026-09-26 120000.png`
+    },
+    async reconcileNow() {
+      calls.push(['reconcileNow'])
+      return 0
+    },
+    async confirm(message) {
+      calls.push(['confirm', message])
+      return confirmResult
+    },
 
     async listDestinations() {
       return [...destinations].sort((a, b) => Number(b.is_default) - Number(a.is_default) || a.sort_order - b.sort_order || a.id - b.id)
@@ -265,5 +287,7 @@ export function createMockCommands(seed: MockSeed = {}): MockHandle {
     calls,
     state: { screenshots, destinations, settings, folders },
     setPickFolderResult(v) { pickFolderResult = v },
+    setConfirmResult(v) { confirmResult = v },
+    setClipboardHasImage(v) { clipboardHasImage = v },
   }
 }

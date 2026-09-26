@@ -58,6 +58,7 @@ pub struct ScreenshotCard {
     pub original_name: String,
     pub captured_at: String,
     pub label: String,
+    pub notes: String,
     pub destination_id: i64,
     pub destination_name: String,
     pub status: Status,

@@ -46,6 +46,19 @@ describe('mock commands', () => {
     expect(calls).toEqual([['hideToast'], ['openPopupFor', 3]])
   })
 
+  it('confirm and paste follow the test knobs', async () => {
+    const mock = createMockCommands()
+    expect(await mock.commands.confirm('sure?')).toBe(true)
+    mock.setConfirmResult(false)
+    expect(await mock.commands.confirm('sure?')).toBe(false)
+    expect(await mock.commands.pasteClipboardImage()).toMatch(/Screenshot .*\.png$/)
+    mock.setClipboardHasImage(false)
+    await expect(mock.commands.pasteClipboardImage()).rejects.toMatchObject({ code: 'InvalidInput' })
+    await mock.commands.copyImage(2)
+    expect(mock.calls).toContainEqual(['copyImage', 2])
+    expect(await mock.commands.reconcileNow()).toBe(0)
+  })
+
   it('setSetting validates like the backend', async () => {
     const { commands } = createMockCommands()
     await expect(commands.setSetting('toast_seconds', 'abc')).rejects.toMatchObject({ code: 'InvalidInput' })
