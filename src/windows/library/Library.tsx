@@ -354,7 +354,8 @@ export function Library({ sidePanel, settings }: Props = {}) {
               onUnlabeled={() => { lib.setDestination(null); lib.setUnlabeledOnly(true) }}
               onDestination={(id) => { lib.setDestination(id); lib.setUnlabeledOnly(false) }}
               onTag={lib.setTag} onManage={() => setView('settings')} />
-            <div className="flex-1 overflow-auto">
+            {/* A column, so the results line sits at the bottom when the grid is short without adding height. */}
+            <div className="flex min-h-0 flex-1 flex-col overflow-auto">
               <Grid ref={gridRef} cards={lib.cards} selected={selected} cursorId={cursor} onSelect={onCardSelect} onOpen={open} onMenu={openMenu}
                 emptyText={q || lib.tag || lib.destination != null || lib.unlabeledOnly ? 'No screenshots match.' : 'No screenshots yet. Take one with Win+Shift+S, paste one with Ctrl+V, or drag images in from Explorer.'} />
               {(count > 0 || q) && (
