@@ -10,6 +10,7 @@ mod tray;
 mod undo;
 mod watch;
 mod watch_folder;
+mod win32;
 mod windows;
 
 use snapnote_core::store::Store;
