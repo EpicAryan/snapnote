@@ -6,6 +6,7 @@ pub mod files;
 pub mod import;
 pub mod ingest;
 pub mod model;
+pub mod reconcile;
 pub mod save;
 pub mod slug;
 pub mod store;
