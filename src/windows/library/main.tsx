@@ -11,7 +11,7 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <CommandsProvider commands={tauriCommands}>
       <Library
-        sidePanel={(id, ctx) => <SidePanel id={id} onChanged={ctx.onChanged} onClose={ctx.onClose} onDelete={ctx.onDelete} onCopy={ctx.onCopy} editRequest={ctx.editRequest} />}
+        sidePanel={(id, ctx) => <SidePanel id={id} onChanged={ctx.onChanged} onClose={ctx.onClose} onDelete={ctx.onDelete} onCopy={ctx.onCopy} editRequest={ctx.editRequest} tagSuggestions={ctx.tagSuggestions} />}
         settings={<SettingsScreen />}
       />
     </CommandsProvider>

@@ -107,3 +107,30 @@ describe('Toast', () => {
     expect(screen.queryByRole('img')).toBeNull()
   })
 })
+
+describe('Toast quick labels', () => {
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers() })
+
+  it('shows recent labels; clicking one saves label and destination without the popup', async () => {
+    const mock = setup()
+    await flush()
+    const d = await mock.commands.createDestination('Embee', 'D:\\Work\\Embee')
+    await mock.commands.saveMetadata(2, 'Invoice', '', [], { kind: 'existing', id: d.id })
+    act(() => mock.emit('toast:show', { id: 1 }))
+    await flush()
+    fireEvent.click(screen.getByRole('button', { name: 'Invoice' }))
+    await flush()
+    expect(mock.state.screenshots[0]).toMatchObject({ label: 'Invoice', destination_id: d.id })
+    expect(mock.calls).toEqual([['hideToast']])
+    expect(screen.queryByText('Screenshot saved')).toBeNull()
+  })
+
+  it('has no chip row when nothing was labeled yet', async () => {
+    const mock = setup()
+    await flush()
+    act(() => mock.emit('toast:show', { id: 1 }))
+    await flush()
+    expect(screen.queryAllByRole('button').filter((b) => b.getAttribute('data-testid') !== 'toast')).toHaveLength(0)
+  })
+})

@@ -1,6 +1,6 @@
 import type {
-  AddReport, Destination, DestinationChoice, ImportReport, ListQuery, SaveResult, Screenshot,
-  ScreenshotCard, SettingKey, Settings,
+  AddReport, DeleteReport, Destination, DestinationChoice, ImportReport, LibraryCounts, ListQuery, MoveReport,
+  RecentLabel, SaveResult, Screenshot, ScreenshotCard, SettingKey, Settings, UndoReport,
 } from './types'
 
 export interface Events {
@@ -26,16 +26,25 @@ export type Unlisten = () => void
 export interface Commands {
   listScreenshots(query: Partial<ListQuery>): Promise<ScreenshotCard[]>
   getScreenshot(id: number): Promise<Screenshot>
-  saveMetadata(id: number, label: string, notes: string, choice: DestinationChoice): Promise<SaveResult>
+  saveMetadata(id: number, label: string, notes: string, tags: string[], choice: DestinationChoice): Promise<SaveResult>
   retryMove(id: number): Promise<SaveResult>
   thumbnailUrl(id: number): Promise<string>
   imageDataUrl(id: number): Promise<string>
   openFile(id: number): Promise<void>
   revealFile(id: number): Promise<void>
+  /** Forgets the entry but keeps the file. */
   removeFromLibrary(id: number): Promise<void>
-  deleteFile(id: number): Promise<void>
-  /** Puts the file and its pixels on the clipboard, so Explorer and image editors can both paste it. */
-  copyScreenshot(id: number): Promise<void>
+  /** Recycle Bin plus forget, for one or many. Undoable once via undoDelete with the token. */
+  deleteScreenshots(ids: number[]): Promise<DeleteReport>
+  undoDelete(token: number): Promise<UndoReport>
+  /** Files on the clipboard (Explorer paste); a single one also as an image. Resolves to how many. */
+  copyScreenshots(ids: number[]): Promise<number>
+  /** Moves several to one destination, keeping each one's label, notes and tags. */
+  moveScreenshots(ids: number[], choice: DestinationChoice): Promise<MoveReport>
+  /** Adds tags without removing existing ones. Resolves to how many rows changed. */
+  addTags(ids: number[], tags: string[]): Promise<number>
+  recentLabels(): Promise<RecentLabel[]>
+  libraryCounts(): Promise<LibraryCounts>
   /** Adds files from the clipboard, or saves a clipboard image into the Screenshots folder. */
   pasteClipboard(): Promise<AddReport>
   /** Adds image files (for example dropped from Explorer) to the library. */

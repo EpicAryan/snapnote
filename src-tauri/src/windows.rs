@@ -29,16 +29,35 @@ pub fn toast_position(work_x: i32, work_y: i32, work_w: u32, work_h: u32, win_w:
     )
 }
 
+pub const TOAST_WIDTH: f64 = 340.0;
+pub const TOAST_HEIGHT: f64 = 88.0;
+/// With a row of recent-label chips.
+pub const TOAST_HEIGHT_TALL: f64 = 124.0;
+
+pub fn toast_height(recent_labels: usize) -> f64 {
+    if recent_labels > 0 {
+        TOAST_HEIGHT_TALL
+    } else {
+        TOAST_HEIGHT
+    }
+}
+
 pub fn show_toast(app: &AppHandle, id: i64) {
     let state = app.state::<AppState>();
     if let Ok(mut t) = state.toast_id.lock() {
         *t = Some(id);
     }
+    let recents = state.store().ok().and_then(|s| s.recent_labels(3).ok()).map(|v| v.len()).unwrap_or(0);
+    let height = toast_height(recents);
     let Some(w) = win(app, TOAST) else { return };
-    if let (Ok(Some(m)), Ok(size)) = (w.primary_monitor(), w.outer_size()) {
+    let _ = w.set_size(tauri::LogicalSize::new(TOAST_WIDTH, height));
+    if let Ok(Some(m)) = w.primary_monitor() {
         let wa = m.work_area();
-        let margin = (16.0 * m.scale_factor()).round() as i32;
-        let (x, y) = toast_position(wa.position.x, wa.position.y, wa.size.width, wa.size.height, size.width, size.height, margin);
+        let scale = m.scale_factor();
+        let margin = (16.0 * scale).round() as i32;
+        // The resize above is asynchronous, so the position comes from the intended size.
+        let (win_w, win_h) = ((TOAST_WIDTH * scale).round() as u32, (height * scale).round() as u32);
+        let (x, y) = toast_position(wa.position.x, wa.position.y, wa.size.width, wa.size.height, win_w, win_h, margin);
         let _ = w.set_position(PhysicalPosition::new(x, y));
     }
     let _ = app.emit_to(TOAST, "toast:show", IdPayload { id });
@@ -258,6 +277,12 @@ mod tests {
         assert!(bounds_visible_on(&monitors, &Bounds { x: -1500, y: 200, w: 1100, h: 720 }));
         assert!(!bounds_visible_on(&monitors, &Bounds { x: 5000, y: 100, w: 1100, h: 720 }), "unplugged monitor");
         assert!(!bounds_visible_on(&monitors, &Bounds { x: 100, y: -900, w: 1100, h: 720 }));
+    }
+
+    #[test]
+    fn toast_grows_only_when_there_are_recent_labels() {
+        assert_eq!(toast_height(0), TOAST_HEIGHT);
+        assert_eq!(toast_height(3), TOAST_HEIGHT_TALL);
     }
 
     #[test]

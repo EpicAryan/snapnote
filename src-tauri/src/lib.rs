@@ -7,6 +7,7 @@ mod reconcile;
 mod startup;
 mod state;
 mod tray;
+mod undo;
 mod watch;
 mod watch_folder;
 mod windows;
@@ -77,6 +78,7 @@ pub fn run() {
                 watcher: Mutex::new(None),
                 hotkey_error: Mutex::new(None),
                 library_placement: Mutex::new(Default::default()),
+                undo: Mutex::new(None),
             });
 
             windows::restore_library_bounds(app.handle());
@@ -118,13 +120,18 @@ pub fn run() {
             commands::screenshots::open_file,
             commands::screenshots::reveal_file,
             commands::screenshots::remove_from_library,
-            commands::screenshots::delete_file,
+            commands::screenshots::delete_screenshots,
+            commands::screenshots::undo_delete,
+            commands::screenshots::copy_screenshots,
+            commands::screenshots::move_screenshots,
+            commands::screenshots::add_tags,
             commands::system::import_existing,
             commands::system::clear_thumbnail_cache,
-            commands::screenshots::copy_screenshot,
             commands::system::paste_clipboard,
             commands::system::add_files,
             commands::system::reconcile_now,
+            commands::system::recent_labels,
+            commands::system::library_counts,
         ])
         .build(tauri::generate_context!())
         .expect("error while building snapnote")

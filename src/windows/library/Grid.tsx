@@ -1,12 +1,13 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, type MouseEvent } from 'react'
 import type { ScreenshotCard } from '../../lib/types'
 import { Card } from './Card'
 
 interface Props {
   cards: ScreenshotCard[]
-  selectedId: number | null
+  selected: Set<number>
+  cursorId: number | null
   emptyText: string
-  onSelect(id: number): void
+  onSelect(id: number, e: MouseEvent): void
   onOpen(id: number): void
   onMenu(id: number, x: number, y: number): void
 }
@@ -23,24 +24,25 @@ export function columnsOf(grid: HTMLElement | null): number {
 }
 
 /** The card grid. Keyboard handling lives in Library so it works wherever focus is. */
-export const Grid = forwardRef<HTMLDivElement, Props>(function Grid({ cards, selectedId, emptyText, onSelect, onOpen, onMenu }, ref) {
+export const Grid = forwardRef<HTMLDivElement, Props>(function Grid({ cards, selected, cursorId, emptyText, onSelect, onOpen, onMenu }, ref) {
   const inner = useRef<HTMLDivElement>(null)
   useImperativeHandle(ref, () => inner.current as HTMLDivElement)
 
   useEffect(() => {
-    if (selectedId == null) return
-    const el = inner.current?.querySelector<HTMLElement>(`[data-card="${selectedId}"]`)
+    if (cursorId == null) return
+    const el = inner.current?.querySelector<HTMLElement>(`[data-card="${cursorId}"]`)
     el?.scrollIntoView?.({ block: 'nearest' })
-  }, [selectedId])
+  }, [cursorId])
 
   return (
-    <div ref={inner} data-testid="grid" role="listbox" aria-label="Screenshots" tabIndex={0} className="group/grid min-h-full outline-none">
+    <div ref={inner} data-testid="grid" role="listbox" aria-multiselectable="true" aria-label="Screenshots" tabIndex={0} className="group/grid min-h-full outline-none">
       {cards.length === 0 ? (
         <div className="p-8 text-center text-sm text-neutral-500">{emptyText}</div>
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3 p-3">
           {cards.map((c) => (
-            <Card key={c.id} card={c} selected={c.id === selectedId} onSelect={() => onSelect(c.id)} onOpen={() => onOpen(c.id)} onMenu={(x, y) => onMenu(c.id, x, y)} />
+            <Card key={c.id} card={c} selected={selected.has(c.id)} cursor={c.id === cursorId}
+              onSelect={(e) => onSelect(c.id, e)} onOpen={() => onOpen(c.id)} onMenu={(x, y) => onMenu(c.id, x, y)} />
           ))}
         </div>
       )}

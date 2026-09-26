@@ -8,15 +8,15 @@ import { Library, type PanelContext } from './Library'
 type Mock = ReturnType<typeof createMockCommands>
 type Panel = (id: number, ctx: PanelContext) => ReactNode
 
-function renderLib(mock: Mock, sidePanel?: Panel) {
-  return render(<CommandsProvider commands={mock.commands}><Library sidePanel={sidePanel} /></CommandsProvider>)
+function renderLib(mock: Mock, sidePanel?: Panel, settings?: ReactNode) {
+  return render(<CommandsProvider commands={mock.commands}><Library sidePanel={sidePanel} settings={settings} /></CommandsProvider>)
 }
 
 async function setup(sidePanel?: Panel) {
   const mock = createMockCommands()
   const embee = await mock.commands.createDestination('Embee', 'D:\\Work\\Embee')
-  await mock.commands.saveMetadata(1, 'Invoice timeout', 'DB timeout while syncing', { kind: 'existing', id: embee.id })
-  await mock.commands.saveMetadata(2, 'Login page bug', '', { kind: 'existing', id: 1 })
+  await mock.commands.saveMetadata(1, 'Invoice timeout', 'DB timeout while syncing', [], { kind: 'existing', id: embee.id })
+  await mock.commands.saveMetadata(2, 'Login page bug', '', [], { kind: 'existing', id: 1 })
   renderLib(mock, sidePanel)
   await screen.findAllByTestId('card')
   return { mock, embee }
@@ -24,8 +24,10 @@ async function setup(sidePanel?: Panel) {
 
 const cards = () => screen.getAllByTestId('card')
 const cardNames = () => cards().map((c) => within(c).getByTestId('card-title').textContent)
-const selectedName = () => cards().find((c) => c.getAttribute('aria-selected') === 'true')?.querySelector('[data-testid=card-title]')?.textContent
+const selectedNames = () => cards().filter((c) => c.getAttribute('aria-selected') === 'true').map((c) => within(c).getByTestId('card-title').textContent)
+const selectedName = () => selectedNames()[0]
 const key = (k: string, init: KeyboardEventInit = {}) => fireEvent.keyDown(document.body, { key: k, ...init })
+const sidebar = () => screen.getByRole('navigation', { name: 'Filters' })
 
 afterEach(() => vi.useRealTimers())
 
@@ -40,19 +42,39 @@ describe('Library', () => {
     expect(await within(first).findByRole('img')).toHaveAttribute('src', 'mock://thumb/1')
   })
 
-  it('search narrows results after the debounce', async () => {
-    await setup()
+  it('search narrows results after the debounce, including by tag', async () => {
+    const { mock } = await setup()
+    await mock.commands.addTags([3], ['receipt'])
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'sync' } })
     await waitFor(() => expect(cardNames()).toEqual(['Invoice timeout']))
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'rece' } })
+    await waitFor(() => expect(cardNames()).toEqual(['Screenshot 2026-09-25 120602.png']))
   })
 
-  it('destination filter and unlabeled toggle compose', async () => {
-    const { embee } = await setup()
-    fireEvent.change(screen.getByLabelText('Destination filter'), { target: { value: String(embee.id) } })
+  it('the sidebar filters by folder, unlabeled and tag, and shows counts', async () => {
+    const { mock } = await setup()
+    await act(async () => { await mock.commands.addTags([1, 2], ['urgent']) })
+    await within(sidebar()).findByRole('button', { name: '#urgent, 2' })
+    expect(within(sidebar()).getByRole('button', { name: 'All screenshots, 3' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(sidebar()).getByRole('button', { name: 'Embee, 1' })).toBeInTheDocument()
+    fireEvent.click(within(sidebar()).getByRole('button', { name: /^Embee/ }))
     await waitFor(() => expect(cardNames()).toEqual(['Invoice timeout']))
-    fireEvent.change(screen.getByLabelText('Destination filter'), { target: { value: '' } })
-    fireEvent.click(screen.getByLabelText('Unlabeled only'))
+    fireEvent.click(within(sidebar()).getByRole('button', { name: /^Unlabeled/ }))
     await waitFor(() => expect(cardNames()).toEqual(['Screenshot 2026-09-25 120602.png']))
+    fireEvent.click(within(sidebar()).getByRole('button', { name: /^All screenshots/ }))
+    fireEvent.click(within(sidebar()).getByRole('button', { name: /^#urgent/ }))
+    await waitFor(() => expect(cardNames()).toEqual(['Invoice timeout', 'Login page bug']))
+    expect(within(cards()[0]).getByText('#urgent')).toBeInTheDocument()
+    fireEvent.click(within(sidebar()).getByRole('button', { name: /^#urgent/ }))
+    await waitFor(() => expect(cardNames()).toHaveLength(3))
+  })
+
+  it('Manage in the sidebar opens settings', async () => {
+    const mock = createMockCommands()
+    renderLib(mock, undefined, <div>SETTINGS PANE</div>)
+    await screen.findAllByTestId('card')
+    fireEvent.click(within(sidebar()).getByRole('button', { name: 'Manage' }))
+    expect(screen.getByText('SETTINGS PANE')).toBeInTheDocument()
   })
 
   it('sort toggles to oldest first', async () => {
@@ -67,6 +89,7 @@ describe('Library', () => {
     fireEvent.click(cards()[0])
     fireEvent.keyDown(grid, { key: 'ArrowRight' })
     expect(cards()[1]).toHaveAttribute('aria-selected', 'true')
+    expect(cards()[0]).toHaveAttribute('aria-selected', 'false')
     fireEvent.keyDown(grid, { key: 'Enter' })
     await waitFor(() => expect(mock.calls).toContainEqual(['openFile', 2]))
     fireEvent.keyDown(document.body, { key: '/' })
@@ -114,6 +137,36 @@ describe('Library', () => {
     }
   })
 
+  it('Ctrl+click toggles, Shift+click ranges, Ctrl+A selects all, Escape clears', async () => {
+    await setup()
+    fireEvent.click(cards()[0])
+    fireEvent.click(cards()[2], { ctrlKey: true })
+    expect(selectedNames()).toEqual(['Invoice timeout', 'Screenshot 2026-09-25 120602.png'])
+    expect(screen.getByText('2 selected')).toBeInTheDocument()
+    fireEvent.click(cards()[1], { shiftKey: true })
+    expect(selectedNames()).toEqual(['Login page bug', 'Screenshot 2026-09-25 120602.png'])
+    fireEvent.click(cards()[2], { ctrlKey: true })
+    expect(selectedNames()).toEqual(['Login page bug'])
+    key('a', { ctrlKey: true })
+    expect(selectedNames()).toHaveLength(3)
+    expect(screen.getByText('3 selected')).toBeInTheDocument()
+    key('Escape')
+    expect(selectedNames()).toHaveLength(0)
+    expect(screen.queryByText(/selected$/)).toBeNull()
+  })
+
+  it('Shift+arrows extend the selection from the anchor; Ctrl+Space toggles the cursor card', async () => {
+    await setup()
+    fireEvent.click(cards()[0])
+    key('ArrowRight', { shiftKey: true })
+    key('ArrowRight', { shiftKey: true })
+    expect(selectedNames()).toHaveLength(3)
+    key('ArrowLeft', { shiftKey: true })
+    expect(selectedNames()).toEqual(['Invoice timeout', 'Login page bug'])
+    key(' ', { ctrlKey: true })
+    expect(selectedNames()).toEqual(['Invoice timeout'])
+  })
+
   it('refreshes when a screenshot:new event arrives', async () => {
     const { mock } = await setup()
     mock.state.screenshots.push({ ...mock.state.screenshots[0], id: 99, label: 'Brand new', captured_at: '2026-09-27T00:00:00', path: 'C:\\x\\new.png', original_name: 'new.png' })
@@ -129,7 +182,7 @@ describe('Library', () => {
 
   it('switches to the settings view when the tray asks for it', async () => {
     const mock = createMockCommands()
-    render(<CommandsProvider commands={mock.commands}><Library settings={<div>SETTINGS PANE</div>} /></CommandsProvider>)
+    renderLib(mock, undefined, <div>SETTINGS PANE</div>)
     await screen.findAllByTestId('card')
     await act(async () => { mock.emit('library:view', { view: 'settings' }) })
     expect(screen.getByText('SETTINGS PANE')).toBeInTheDocument()
@@ -161,7 +214,7 @@ describe('Library', () => {
     await screen.findByText(/Showing 3 \(all\)/)
   })
 
-  it('shows the details pane only while a card is selected; its button and Escape close it', async () => {
+  it('shows the details pane only while one card is selected; its button and Escape close it', async () => {
     await setup((id, ctx) => <div>PANEL {id}<button onClick={ctx.onClose}>close panel</button></div>)
     expect(screen.queryByText(/PANEL/)).toBeNull()
     fireEvent.click(cards()[0])
@@ -172,19 +225,42 @@ describe('Library', () => {
     expect(screen.getByTestId('grid')).toHaveFocus()
     fireEvent.click(cards()[1])
     expect(screen.getByText(/PANEL 2/)).toBeInTheDocument()
-    key('Escape')
+    fireEvent.click(cards()[2], { ctrlKey: true })
     expect(screen.queryByText(/PANEL/)).toBeNull()
+    expect(screen.getByText('2 selected')).toBeInTheDocument()
+    key('Escape')
+    expect(screen.queryByText('2 selected')).toBeNull()
   })
 
-  it('Delete asks for confirmation, sends the file to the Recycle Bin, and selects the next card', async () => {
+  it('Delete asks for confirmation, sends the file to the Recycle Bin, selects the next card and offers Undo', async () => {
     const { mock } = await setup()
     fireEvent.click(cards()[0])
     fireEvent.keyDown(screen.getByTestId('grid'), { key: 'Delete' })
     await waitFor(() => expect(mock.calls).toContainEqual(['confirm', expect.stringContaining('Recycle Bin')]))
-    await waitFor(() => expect(mock.calls).toContainEqual(['deleteFile', 1]))
+    await waitFor(() => expect(mock.calls).toContainEqual(['deleteScreenshots', [1]]))
     await waitFor(() => expect(cardNames()).toEqual(['Login page bug', 'Screenshot 2026-09-25 120602.png']))
     expect(selectedName()).toBe('Login page bug')
-    await screen.findByText(/Moved to the Recycle Bin/)
+    await screen.findByText(/Moved 1 screenshot to the Recycle Bin/)
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    await waitFor(() => expect(mock.calls).toContainEqual(['undoDelete', 1]))
+    await waitFor(() => expect(cardNames()).toHaveLength(3))
+    await screen.findByText(/Restored 1 screenshot/)
+    expect(selectedName()).toBe('Invoice timeout')
+  })
+
+  it('deleting a multi-selection asks once with the count and Undo brings all of them back', async () => {
+    const { mock } = await setup()
+    fireEvent.click(cards()[0])
+    fireEvent.click(cards()[1], { ctrlKey: true })
+    key('Delete')
+    await waitFor(() => expect(mock.calls).toContainEqual(['confirm', 'Move 2 screenshots to the Recycle Bin, and remove them from the library?']))
+    await waitFor(() => expect(mock.calls).toContainEqual(['deleteScreenshots', [1, 2]]))
+    await waitFor(() => expect(cardNames()).toEqual(['Screenshot 2026-09-25 120602.png']))
+    expect(selectedName()).toBe('Screenshot 2026-09-25 120602.png')
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo' }))
+    await waitFor(() => expect(cardNames()).toHaveLength(3))
+    await screen.findByText(/Restored 2 screenshots/)
+    expect(mock.state.trash).toHaveLength(0)
   })
 
   it('a declined confirmation deletes nothing', async () => {
@@ -193,7 +269,7 @@ describe('Library', () => {
     fireEvent.click(cards()[0])
     key('Delete')
     await waitFor(() => expect(mock.calls).toContainEqual(['confirm', expect.any(String)]))
-    expect(mock.calls).not.toContainEqual(['deleteFile', 1])
+    expect(mock.calls).not.toContainEqual(['deleteScreenshots', [1]])
     expect(cardNames()).toHaveLength(3)
   })
 
@@ -204,15 +280,38 @@ describe('Library', () => {
     key('Delete')
     await waitFor(() => expect(mock.calls).toContainEqual(['confirm', expect.stringContaining('already gone')]))
     await waitFor(() => expect(mock.state.screenshots).toHaveLength(0))
-    expect(mock.calls).not.toContainEqual(['deleteFile', 1])
+    await screen.findByText(/removed 1 missing entry/)
   })
 
-  it('Ctrl+C copies the selected screenshot as a file and image, and says so', async () => {
+  it('Ctrl+C copies the selection as files and says so', async () => {
     const { mock } = await setup()
     fireEvent.click(cards()[1])
     key('c', { ctrlKey: true })
-    await waitFor(() => expect(mock.calls).toContainEqual(['copyScreenshot', 2]))
-    await screen.findByText(/Copied/)
+    await waitFor(() => expect(mock.calls).toContainEqual(['copyScreenshots', [2]]))
+    await screen.findByText(/Copied\. Paste it/)
+    fireEvent.click(cards()[2], { ctrlKey: true })
+    key('c', { ctrlKey: true })
+    await waitFor(() => expect(mock.calls).toContainEqual(['copyScreenshots', [2, 3]]))
+    await screen.findByText(/Copied 2 files/)
+  })
+
+  it('the multi panel moves the selection to a folder and adds tags', async () => {
+    const { mock, embee } = await setup()
+    fireEvent.click(cards()[1])
+    fireEvent.click(cards()[2], { ctrlKey: true })
+    const panel = screen.getByText('2 selected').closest('aside')!
+    fireEvent.change(within(panel).getByLabelText('Move to'), { target: { value: String(embee.id) } })
+    fireEvent.click(within(panel).getByRole('button', { name: 'Move' }))
+    await waitFor(() => expect(mock.calls).toContainEqual(['moveScreenshots', [2, 3], { kind: 'existing', id: embee.id }]))
+    await screen.findByText(/Moved 2 to Embee/)
+    await waitFor(() => expect(within(cards()[1]).getByText('Embee')).toBeInTheDocument())
+    const tagInput = within(panel).getByLabelText('Tags to add')
+    fireEvent.change(tagInput, { target: { value: 'Client X' } })
+    fireEvent.keyDown(tagInput, { key: 'Enter' })
+    fireEvent.click(within(panel).getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(mock.calls).toContainEqual(['addTags', [2, 3], ['client-x']]))
+    await waitFor(() => expect(within(cards()[1]).getByText('#client-x')).toBeInTheDocument())
+    await screen.findByText(/Tagged 2 screenshots/)
   })
 
   it('Ctrl+V and the Paste button save a clipboard image into the Screenshots folder', async () => {
@@ -261,14 +360,35 @@ describe('Library', () => {
     fireEvent.click(within(menu).getByRole('menuitem', { name: /Delete/ }))
     expect(screen.queryByRole('menu')).toBeNull()
     await waitFor(() => expect(mock.calls).toContainEqual(['confirm', expect.stringContaining('Invoice timeout')]))
-    await waitFor(() => expect(mock.calls).toContainEqual(['deleteFile', 1]))
+    await waitFor(() => expect(mock.calls).toContainEqual(['deleteScreenshots', [1]]))
+  })
+
+  it('right-clicking inside a multi-selection offers batch actions', async () => {
+    const { mock } = await setup()
+    fireEvent.click(cards()[0])
+    fireEvent.click(cards()[2], { ctrlKey: true })
+    fireEvent.contextMenu(cards()[2])
+    const menu = screen.getByRole('menu')
+    expect(within(menu).getByRole('menuitem', { name: /Copy 2 files/ })).toBeInTheDocument()
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /Delete 2/ }))
+    await waitFor(() => expect(mock.calls).toContainEqual(['confirm', expect.stringContaining('2 screenshots')]))
+    await waitFor(() => expect(mock.calls).toContainEqual(['deleteScreenshots', [1, 3]]))
+  })
+
+  it('right-clicking outside the selection switches to that card alone', async () => {
+    await setup()
+    fireEvent.click(cards()[0])
+    fireEvent.click(cards()[1], { ctrlKey: true })
+    fireEvent.contextMenu(cards()[2])
+    expect(selectedNames()).toEqual(['Screenshot 2026-09-25 120602.png'])
+    expect(within(screen.getByRole('menu')).getByRole('menuitem', { name: /Preview/ })).toBeInTheDocument()
   })
 
   it('the ⋯ button on a card opens the same menu; Copy copies', async () => {
     const { mock } = await setup()
     fireEvent.click(within(cards()[1]).getByRole('button', { name: 'More actions' }))
     fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: /^Copy/ }))
-    await waitFor(() => expect(mock.calls).toContainEqual(['copyScreenshot', 2]))
+    await waitFor(() => expect(mock.calls).toContainEqual(['copyScreenshots', [2]]))
   })
 
   it('the menu opens from the keyboard and is keyboard driven', async () => {

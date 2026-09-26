@@ -1,5 +1,9 @@
 import type { Commands, Events, Unlisten } from './commands'
-import type { AddReport, AppError, Destination, DestinationChoice, ListQuery, SaveResult, Screenshot, ScreenshotCard, Settings } from './types'
+import { normalizeTags } from './format'
+import type {
+  AddReport, AppError, DeleteReport, Destination, DestinationChoice, LibraryCounts, ListQuery, MoveReport, RecentLabel,
+  SaveResult, Screenshot, ScreenshotCard, Settings, UndoReport,
+} from './types'
 import { DEFAULT_QUERY } from './types'
 
 const WATCH = 'C:\\Users\\me\\OneDrive\\Pictures\\Screenshots'
@@ -22,7 +26,7 @@ export interface MockHandle {
   commands: Commands
   emit<E extends keyof Events>(event: E, payload: Events[E]): void
   calls: unknown[][]
-  state: { screenshots: Screenshot[]; destinations: Destination[]; settings: Settings; folders: Set<string> }
+  state: { screenshots: Screenshot[]; destinations: Destination[]; settings: Settings; folders: Set<string>; trash: Screenshot[] }
   setPickFolderResult(v: string | null): void
   setConfirmResult(v: boolean): void
   /** What the next paste finds: files (Explorer copy) win over an image. Defaults to an image. */
@@ -50,6 +54,7 @@ export function createMockCommands(seed: MockSeed = {}): MockHandle {
     hash: `hash${i}`,
     label: '',
     notes: '',
+    tags: [] as string[],
     destination_id: 1,
     status: 'present' as const,
     pending_move_to: null,
@@ -57,7 +62,7 @@ export function createMockCommands(seed: MockSeed = {}): MockHandle {
     updated_at: now,
   }))
   const screenshots: Screenshot[] = seed.screenshots
-    ? seed.screenshots.map((s, i) => ({ ...baseShots[i % baseShots.length], id: i + 1, ...s }))
+    ? seed.screenshots.map((s, i) => ({ ...baseShots[i % baseShots.length], id: i + 1, tags: [], ...s }))
     : baseShots
   const settings: Settings = {
     watch_folder_override: '',
@@ -71,6 +76,7 @@ export function createMockCommands(seed: MockSeed = {}): MockHandle {
     ...seed.settings,
   }
   const folders = new Set<string>([WATCH, 'D:\\Work\\Embee', 'D:\\ClientX'])
+  const trash: Screenshot[] = []
   const listeners = new Map<string, Set<(p: unknown) => void>>()
   const calls: unknown[][] = []
   let nextId = screenshots.length + 1
@@ -78,6 +84,11 @@ export function createMockCommands(seed: MockSeed = {}): MockHandle {
   let pickFolderResult: string | null = 'D:\\ClientX'
   let confirmResult = true
   let clipboard: { image: boolean; files: string[] } = { image: true, files: [] }
+  // Save order, so recentLabels can say what was used last (updated_at is a constant here).
+  const touched = new Map<number, number>()
+  let touchSeq = 0
+  let undoSeq = 0
+  let lastBatch: { token: number; items: Screenshot[] } | null = null
 
   const emit: MockHandle['emit'] = (event, payload) => {
     listeners.get(event)?.forEach((h) => h(payload))
@@ -100,6 +111,7 @@ export function createMockCommands(seed: MockSeed = {}): MockHandle {
     captured_at: s.captured_at,
     label: s.label,
     notes: s.notes,
+    tags: s.tags,
     destination_id: s.destination_id,
     destination_name: findDest(s.destination_id).name,
     status: s.status,
@@ -107,7 +119,7 @@ export function createMockCommands(seed: MockSeed = {}): MockHandle {
   })
   const matches = (s: Screenshot, q: string) => {
     const terms = q.toLowerCase().split(/\s+/).map((t) => t.replace(/[^\p{L}\p{N}]/gu, '')).filter(Boolean)
-    const words = `${s.label} ${s.notes}`.toLowerCase().split(/[^\p{L}\p{N}]+/u)
+    const words = `${s.label} ${s.notes} ${s.tags.join(' ')}`.toLowerCase().split(/[^\p{L}\p{N}]+/u)
     return terms.every((t) => words.some((w) => w.startsWith(t)))
   }
   const createDestination = async (name: string, path: string): Promise<Destination> => {
@@ -129,7 +141,7 @@ export function createMockCommands(seed: MockSeed = {}): MockHandle {
   }
   const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p
   const addRow = (path: string): Screenshot => {
-    const s: Screenshot = { ...baseShots[0], id: nextId++, path, original_name: baseName(path), captured_at: '2026-09-26T12:00:00', label: '', notes: '', destination_id: 1, status: 'present', pending_move_to: null }
+    const s: Screenshot = { ...baseShots[0], id: nextId++, path, original_name: baseName(path), captured_at: '2026-09-26T12:00:00', label: '', notes: '', tags: [], destination_id: 1, status: 'present', pending_move_to: null }
     screenshots.push(s)
     emit('screenshot:new', { id: s.id })
     return s
@@ -170,21 +182,27 @@ export function createMockCommands(seed: MockSeed = {}): MockHandle {
   const commands: Commands = {
     async listScreenshots(partial) {
       const q: ListQuery = { ...DEFAULT_QUERY, ...partial }
-      let rows = screenshots.filter((s) => (!q.q.trim() || matches(s, q.q)) && (q.destination_id == null || s.destination_id === q.destination_id) && (!q.unlabeled_only || s.label === ''))
+      let rows = screenshots.filter((s) =>
+        (!q.q.trim() || matches(s, q.q))
+        && (q.destination_id == null || s.destination_id === q.destination_id)
+        && (!q.unlabeled_only || s.label === '')
+        && (!q.tag || s.tags.includes(q.tag)))
       rows = rows.sort((a, b) => (a.captured_at < b.captured_at ? 1 : a.captured_at > b.captured_at ? -1 : b.id - a.id))
       if (q.sort === 'oldest') rows = rows.reverse()
       return rows.slice(q.offset, q.offset + q.limit).map(toCard)
     },
     async getScreenshot(id) {
-      return { ...find(id) }
+      return { ...find(id), tags: [...find(id).tags] }
     },
-    async saveMetadata(id, label, notes, choice) {
+    async saveMetadata(id, label, notes, tags, choice) {
       const s = find(id)
       const dest = await resolve(choice)
       s.label = label.trim()
       s.notes = notes.trim()
+      s.tags = normalizeTags(tags)
       s.destination_id = dest.id
       s.updated_at = now
+      touched.set(id, ++touchSeq)
       const r = applyMove(s, dest)
       emit('screenshot:updated', { id })
       return r
@@ -212,13 +230,95 @@ export function createMockCommands(seed: MockSeed = {}): MockHandle {
       screenshots.splice(i, 1)
       emit('screenshot:removed', { id })
     },
-    async deleteFile(id) {
-      calls.push(['deleteFile', id])
-      await commands.removeFromLibrary(id)
+    async deleteScreenshots(ids) {
+      calls.push(['deleteScreenshots', ids])
+      const report: DeleteReport = { deleted: [], trashed: 0, failed: [], undo_token: ++undoSeq }
+      const items: Screenshot[] = []
+      for (const id of ids) {
+        const i = screenshots.findIndex((s) => s.id === id)
+        if (i < 0) { report.failed.push({ id, reason: 'not found' }); continue }
+        const [s] = screenshots.splice(i, 1)
+        if (s.status === 'present') report.trashed++
+        report.deleted.push(id)
+        items.push(s)
+        trash.push(s)
+      }
+      lastBatch = items.length ? { token: report.undo_token, items } : null
+      emit('library:refresh', {})
+      return report
     },
-    async copyScreenshot(id) {
-      find(id)
-      calls.push(['copyScreenshot', id])
+    async undoDelete(token) {
+      calls.push(['undoDelete', token])
+      if (!lastBatch || lastBatch.token !== token) throw err('InvalidInput', 'That delete can no longer be undone')
+      const report: UndoReport = { restored: [], failed: [] }
+      for (const s of lastBatch.items) {
+        const t = trash.indexOf(s)
+        if (t >= 0) trash.splice(t, 1)
+        screenshots.push(s)
+        report.restored.push(s.id)
+      }
+      screenshots.sort((a, b) => a.id - b.id)
+      lastBatch = null
+      emit('library:refresh', {})
+      return report
+    },
+    async copyScreenshots(ids) {
+      calls.push(['copyScreenshots', ids])
+      const present = ids.filter((id) => screenshots.find((s) => s.id === id)?.status === 'present')
+      if (!present.length) throw err('FileMissing', 'Nothing to copy: the file is missing')
+      return present.length
+    },
+    async moveScreenshots(ids, choice) {
+      calls.push(['moveScreenshots', ids, choice])
+      const dest = await resolve(choice)
+      const report: MoveReport = { moved: 0, unchanged: 0, pending: 0, failed: [], destination: dest }
+      for (const id of ids) {
+        const s = screenshots.find((x) => x.id === id)
+        if (!s) { report.failed.push({ id, reason: 'not found' }); continue }
+        s.destination_id = dest.id
+        const r = applyMove(s, dest)
+        if (r.warning) report.pending++
+        else if (r.moved) report.moved++
+        else report.unchanged++
+      }
+      emit('library:refresh', {})
+      emit('settings:changed', {})
+      return report
+    },
+    async addTags(ids, tags) {
+      calls.push(['addTags', ids, tags])
+      const extra = normalizeTags(tags)
+      let changed = 0
+      for (const id of ids) {
+        const s = find(id)
+        const merged = [...s.tags]
+        for (const t of extra) if (!merged.includes(t)) merged.push(t)
+        if (merged.length !== s.tags.length) { s.tags = merged; changed++ }
+      }
+      emit('library:refresh', {})
+      return changed
+    },
+    async recentLabels() {
+      const labeled = screenshots.filter((s) => s.label).sort((a, b) => (touched.get(b.id) ?? 0) - (touched.get(a.id) ?? 0))
+      const out: RecentLabel[] = []
+      for (const s of labeled) {
+        const hit = out.find((r) => r.label.toLowerCase() === s.label.toLowerCase())
+        if (hit) { hit.uses++; continue }
+        out.push({ label: s.label, destination_id: s.destination_id, destination_name: findDest(s.destination_id).name, uses: 1 })
+      }
+      return out.slice(0, 5)
+    },
+    async libraryCounts() {
+      const tagCounts = new Map<string, number>()
+      for (const s of screenshots) for (const t of s.tags) tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1)
+      const counts: LibraryCounts = {
+        total: screenshots.length,
+        unlabeled: screenshots.filter((s) => !s.label).length,
+        missing: screenshots.filter((s) => s.status === 'missing').length,
+        by_destination: destinations.map((d) => ({ destination_id: d.id, count: screenshots.filter((s) => s.destination_id === d.id).length })).filter((x) => x.count > 0),
+        tags: [...tagCounts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag)),
+      }
+      return counts
     },
     async pasteClipboard() {
       calls.push(['pasteClipboard'])
@@ -311,7 +411,7 @@ export function createMockCommands(seed: MockSeed = {}): MockHandle {
     commands,
     emit,
     calls,
-    state: { screenshots, destinations, settings, folders },
+    state: { screenshots, destinations, settings, folders, trash },
     setPickFolderResult(v) { pickFolderResult = v },
     setConfirmResult(v) { confirmResult = v },
     setClipboard(v) { clipboard = { image: v.image ?? false, files: v.files ?? [] } },

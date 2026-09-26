@@ -27,7 +27,7 @@
         "title": "Label screenshot",
         "url": "popup.html",
         "width": 440,
-        "height": 420,
+        "height": 540,
         "resizable": false,
         "decorations": false,
         "alwaysOnTop": true,

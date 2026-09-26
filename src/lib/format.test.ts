@@ -22,3 +22,19 @@ describe('describeAdd', () => {
     expect(describeAdd({ added: [], existing: [], skipped: [] })).toBe('Nothing to add')
   })
 })
+
+describe('tags and reports', () => {
+  it('normalizeTags mirrors the Rust rules', async () => {
+    const { normalizeTags } = await import('./format')
+    expect(normalizeTags(['  Client X ', 'client-x', 'Invoice!', '', 'a_b.c'])).toEqual(['client-x', 'invoice', 'a_b.c'])
+    expect(normalizeTags(['x'.repeat(100)])[0]).toHaveLength(40)
+  })
+  it('describes delete, undo and move results', async () => {
+    const { describeDelete, describeMove, describeUndo } = await import('./format')
+    expect(describeDelete({ deleted: [1, 2, 3], trashed: 2, failed: [], undo_token: 1 })).toBe('Moved 2 screenshots to the Recycle Bin · removed 1 missing entry')
+    expect(describeDelete({ deleted: [], trashed: 0, failed: [{ id: 1, reason: 'locked' }], undo_token: 1 })).toBe('1 failed: locked')
+    expect(describeUndo({ restored: [1], failed: [] })).toBe('Restored 1 screenshot')
+    const dest = { id: 2, name: 'Work', path: 'D:\\Work', sort_order: 0, is_default: false }
+    expect(describeMove({ moved: 2, unchanged: 1, pending: 1, failed: [], destination: dest })).toBe('Moved 2 to Work · 1 already there · 1 could not be moved yet (use Retry move)')
+  })
+})

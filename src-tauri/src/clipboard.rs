@@ -36,3 +36,18 @@ pub fn write_image_file(path: &Path, png: &[u8], bmp: &[u8]) -> Result<(), Strin
 pub fn write_image_file(_path: &Path, _png: &[u8], _bmp: &[u8]) -> Result<(), String> {
     Err("copying files to the clipboard is only supported on Windows".into())
 }
+
+/// Several files at once (Explorer paste). No image formats: there is no single image to offer.
+#[cfg(windows)]
+pub fn write_file_list(paths: &[PathBuf]) -> Result<(), String> {
+    use clipboard_win::{raw, Clipboard};
+    let strings: Vec<String> = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+    let _clip = Clipboard::new_attempts(10).map_err(|e| e.to_string())?;
+    raw::empty().map_err(|e| e.to_string())?;
+    raw::set_file_list(&strings).map_err(|e| e.to_string())
+}
+
+#[cfg(not(windows))]
+pub fn write_file_list(_paths: &[PathBuf]) -> Result<(), String> {
+    Err("copying files to the clipboard is only supported on Windows".into())
+}

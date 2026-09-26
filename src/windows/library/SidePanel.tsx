@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ConfirmButton } from '../../components/ConfirmButton'
 import { DestinationSelect } from '../../components/DestinationSelect'
+import { TagInput } from '../../components/TagInput'
 import { useCommands } from '../../lib/CommandsContext'
 import { formatDate } from '../../lib/format'
 import type { Destination, DestinationChoice, SaveResult, Screenshot } from '../../lib/types'
@@ -17,15 +18,17 @@ interface Props {
   onCopy(): void
   /** Bumped by the library when the user asks to edit (F2, menu): the label input takes focus. */
   editRequest?: number
+  tagSuggestions?: string[]
 }
 
-export function SidePanel({ id, onChanged, onClose, onDelete, onCopy, editRequest = 0 }: Props) {
+export function SidePanel({ id, onChanged, onClose, onDelete, onCopy, editRequest = 0, tagSuggestions = [] }: Props) {
   const cmd = useCommands()
   const [shot, setShot] = useState<Screenshot | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
   const [destinations, setDestinations] = useState<Destination[]>([])
   const [label, setLabel] = useState('')
   const [notes, setNotes] = useState('')
+  const [tags, setTags] = useState<string[]>([])
   const [choice, setChoice] = useState<DestinationChoice>({ kind: 'existing', id: 0 })
   const [msg, setMsg] = useState<{ text: string; tone: 'ok' | 'warn' | 'err' } | null>(null)
   const labelRef = useRef<HTMLInputElement>(null)
@@ -40,7 +43,7 @@ export function SidePanel({ id, onChanged, onClose, onDelete, onCopy, editReques
     try {
       const [s, d] = await Promise.all([cmd.getScreenshot(sid), cmd.listDestinations()])
       if (!current()) return
-      setShot(s); setDestinations(d); setLabel(s.label); setNotes(s.notes); setChoice({ kind: 'existing', id: s.destination_id })
+      setShot(s); setDestinations(d); setLabel(s.label); setNotes(s.notes); setTags(s.tags); setChoice({ kind: 'existing', id: s.destination_id })
       try {
         const p = await cmd.imageDataUrl(sid)
         if (current()) setPreview(p)
@@ -91,9 +94,11 @@ export function SidePanel({ id, onChanged, onClose, onDelete, onCopy, editReques
       <input ref={labelRef} id="sp-label" value={label} maxLength={120} onChange={(e) => setLabel(e.target.value)} className="rounded border border-neutral-700 bg-neutral-800 px-2 py-1" />
       <label className="text-xs text-neutral-400" htmlFor="sp-notes">Notes</label>
       <textarea id="sp-notes" rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} className="rounded border border-neutral-700 bg-neutral-800 px-2 py-1" />
+      <span className="text-xs text-neutral-400">Tags</span>
+      <TagInput value={tags} onChange={setTags} suggestions={tagSuggestions} />
       <label className="text-xs text-neutral-400" htmlFor="sp-dest">Destination</label>
       <DestinationSelect id="sp-dest" destinations={destinations} value={choice} onChange={setChoice} onBrowse={() => cmd.pickFolder()} />
-      <button className="rounded bg-sky-600 px-3 py-1" onClick={() => void after(cmd.saveMetadata(shot.id, label, notes, choice))}>Save</button>
+      <button className="rounded bg-sky-600 px-3 py-1" onClick={() => void after(cmd.saveMetadata(shot.id, label, notes, tags, choice))}>Save</button>
       {msg && <div className={`text-xs ${msg.tone === 'ok' ? 'text-emerald-400' : msg.tone === 'warn' ? 'text-amber-400' : 'text-red-400'}`}>{msg.text}</div>}
 
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-neutral-400">

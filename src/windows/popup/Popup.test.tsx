@@ -108,3 +108,22 @@ describe('Popup', () => {
     await waitFor(() => expect(mock.calls).toEqual([['hidePopup']]))
   })
 })
+
+describe('Popup tags and recent labels', () => {
+  it('offers recent labels as one-click fills and saves tags', async () => {
+    let embeeId = 0
+    const mock = await openFor(1, async (m) => {
+      embeeId = (await m.commands.createDestination('Embee', 'D:\\Work\\Embee')).id
+      await m.commands.saveMetadata(2, 'Invoice', '', [], { kind: 'existing', id: embeeId })
+    })
+    fireEvent.click(await screen.findByRole('button', { name: 'Invoice' }))
+    expect(screen.getByLabelText('Label')).toHaveValue('Invoice')
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe(String(embeeId))
+    const tags = screen.getByLabelText('Tags')
+    fireEvent.change(tags, { target: { value: 'q3' } })
+    fireEvent.keyDown(tags, { key: 'Enter' })
+    expect(mock.state.screenshots[0].label).toBe('')
+    fireEvent.keyDown(screen.getByLabelText('Label'), { key: 'Enter' })
+    await waitFor(() => expect(mock.state.screenshots[0]).toMatchObject({ label: 'Invoice', tags: ['q3'], destination_id: embeeId }))
+  })
+})

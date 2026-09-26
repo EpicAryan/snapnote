@@ -135,7 +135,7 @@ mod tests {
         let db = dir.path().join("t.db");
         Store::open(&db, WATCH).unwrap();
         let s = Store::open(&db, WATCH).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 1);
+        assert_eq!(s.schema_version().unwrap(), 2);
         assert_eq!(s.list_destinations().unwrap().len(), 1);
     }
 

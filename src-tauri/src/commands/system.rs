@@ -4,7 +4,7 @@ use crate::state::AppState;
 use crate::watch_folder;
 use serde::Serialize;
 use snapnote_core::add::{self, AddPlan};
-use snapnote_core::{capture, import, thumbs, ImportReport};
+use snapnote_core::{capture, import, thumbs, ImportReport, LibraryCounts, RecentLabel};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
@@ -142,4 +142,16 @@ pub fn paste_clipboard(app: AppHandle, state: State<'_, AppState>) -> CmdResult<
 #[tauri::command(async)]
 pub fn reconcile_now(app: AppHandle) -> CmdResult<usize> {
     crate::reconcile::run(&app)
+}
+
+/// Labels used recently with the destination they went to: the toast and popup offer them as
+/// one-click choices.
+#[tauri::command(async)]
+pub fn recent_labels(state: State<'_, AppState>) -> CmdResult<Vec<RecentLabel>> {
+    Ok(state.store()?.recent_labels(5)?)
+}
+
+#[tauri::command(async)]
+pub fn library_counts(state: State<'_, AppState>) -> CmdResult<LibraryCounts> {
+    Ok(state.store()?.library_counts()?)
 }

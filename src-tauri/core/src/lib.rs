@@ -13,6 +13,7 @@ pub mod reconcile;
 pub mod save;
 pub mod slug;
 pub mod store;
+pub mod tags;
 pub mod thumbs;
 pub mod watcher;
 

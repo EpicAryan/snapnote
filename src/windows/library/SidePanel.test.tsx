@@ -112,3 +112,19 @@ describe('SidePanel', () => {
     expect(onDelete).toHaveBeenCalled()
   })
 })
+
+describe('SidePanel tags', () => {
+  it('tags round-trip through saveMetadata and suggestions can be clicked', async () => {
+    const mock = createMockCommands()
+    render(<CommandsProvider commands={mock.commands}><SidePanel id={1} onChanged={() => {}} onDelete={() => {}} onCopy={() => {}} tagSuggestions={['urgent']} /></CommandsProvider>)
+    await screen.findByLabelText('Label')
+    const input = screen.getByLabelText('Tags')
+    fireEvent.change(input, { target: { value: 'Client X, invoice' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(screen.getByRole('button', { name: 'Remove tag client-x' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove tag invoice' }))
+    fireEvent.click(screen.getByRole('button', { name: '+ urgent' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(mock.state.screenshots[0].tags).toEqual(['client-x', 'urgent']))
+  })
+})

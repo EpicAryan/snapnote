@@ -1,5 +1,6 @@
 use super::Store;
-use crate::{ListQuery, Result, ScreenshotCard, Sort, Status};
+use crate::{tags, DestinationCount, LibraryCounts, ListQuery, RecentLabel, Result, ScreenshotCard, Sort, Status, TagCount};
+use std::collections::HashMap;
 use rusqlite::{params_from_iter, types::Value};
 
 /// Every run of alphanumerics becomes a quoted prefix term, so `invoice-timeout` matches the
@@ -22,7 +23,7 @@ pub fn fts_query(q: &str) -> Option<String> {
 impl Store {
     pub fn list_screenshots(&self, q: &ListQuery) -> Result<Vec<ScreenshotCard>> {
         let mut sql = String::from(
-            "SELECT s.id, s.path, s.original_name, s.captured_at, s.label, s.notes, s.destination_id, d.name, s.status, s.pending_move_to
+            "SELECT s.id, s.path, s.original_name, s.captured_at, s.label, s.notes, s.destination_id, d.name, s.status, s.pending_move_to, s.tags
              FROM screenshots s JOIN destinations d ON d.id = s.destination_id WHERE 1 = 1",
         );
         let mut args: Vec<Value> = Vec::new();
@@ -36,6 +37,10 @@ impl Store {
         }
         if q.unlabeled_only {
             sql.push_str(" AND s.label = ''");
+        }
+        if let Some(tag) = q.tag.as_deref().filter(|t| !t.trim().is_empty()) {
+            sql.push_str(" AND (' ' || s.tags || ' ') LIKE ?");
+            args.push(Value::Text(format!("% {} %", tags::normalize_tags(&[tag.to_string()]).first().cloned().unwrap_or_default())));
         }
         let dir = match q.sort {
             Sort::Newest => "DESC",
@@ -58,9 +63,58 @@ impl Store {
                 destination_name: r.get(7)?,
                 status: Status::parse(&r.get::<_, String>(8)?),
                 pending_move_to: r.get(9)?,
+                tags: tags::split_stored(&r.get::<_, String>(10)?),
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Labels used most recently, each with the destination it was last saved to. Spellings
+    /// that differ only in case are folded together; the most recent one is kept.
+    pub fn recent_labels(&self, limit: usize) -> Result<Vec<RecentLabel>> {
+        let mut st = self.conn.prepare(
+            "SELECT s.label, s.destination_id, d.name, MAX(s.updated_at) AS last, COUNT(*) AS uses
+             FROM screenshots s JOIN destinations d ON d.id = s.destination_id
+             WHERE s.label != '' GROUP BY lower(s.label), s.destination_id ORDER BY last DESC, s.label ASC",
+        )?;
+        let rows = st.query_map([], |r| {
+            Ok(RecentLabel { label: r.get(0)?, destination_id: r.get(1)?, destination_name: r.get(2)?, uses: r.get(4)? })
+        })?;
+        let mut out: Vec<RecentLabel> = Vec::new();
+        for row in rows {
+            let row = row?;
+            let key = row.label.to_lowercase();
+            if let Some(existing) = out.iter_mut().find(|r| r.label.to_lowercase() == key) {
+                existing.uses += row.uses;
+                continue;
+            }
+            out.push(row);
+        }
+        out.truncate(limit);
+        Ok(out)
+    }
+
+    pub fn library_counts(&self) -> Result<LibraryCounts> {
+        let (total, unlabeled, missing): (i64, i64, i64) = self.conn.query_row(
+            "SELECT COUNT(*), SUM(label = ''), SUM(status = 'missing') FROM screenshots",
+            [],
+            |r| Ok((r.get(0)?, r.get::<_, Option<i64>>(1)?.unwrap_or(0), r.get::<_, Option<i64>>(2)?.unwrap_or(0))),
+        )?;
+        let mut st = self.conn.prepare("SELECT destination_id, COUNT(*) FROM screenshots GROUP BY destination_id ORDER BY destination_id")?;
+        let by_destination = st
+            .query_map([], |r| Ok(DestinationCount { destination_id: r.get(0)?, count: r.get(1)? }))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut st = self.conn.prepare("SELECT tags FROM screenshots WHERE tags != ''")?;
+        let mut counts: HashMap<String, i64> = HashMap::new();
+        for stored in st.query_map([], |r| r.get::<_, String>(0))? {
+            for t in tags::split_stored(&stored?) {
+                *counts.entry(t).or_insert(0) += 1;
+            }
+        }
+        let mut tag_counts: Vec<TagCount> = counts.into_iter().map(|(tag, count)| TagCount { tag, count }).collect();
+        tag_counts.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.tag.cmp(&b.tag)));
+        tag_counts.truncate(100);
+        Ok(LibraryCounts { total, unlabeled, missing, by_destination, tags: tag_counts })
     }
 }
 
@@ -86,8 +140,8 @@ mod tests {
         let a = s.insert_screenshot(&new_shot(&s, "a.png", "2026-09-26T01:00:00")).unwrap();
         let b = s.insert_screenshot(&new_shot(&s, "b.png", "2026-09-25T01:00:00")).unwrap();
         let _c = s.insert_screenshot(&new_shot(&s, "c.png", "2026-09-24T01:00:00")).unwrap();
-        s.update_metadata(a.id, "Invoice timeout", "DB timeout while syncing", embee.id).unwrap();
-        s.update_metadata(b.id, "Login page bug", "", s.default_destination().unwrap().id).unwrap();
+        s.update_metadata(a.id, "Invoice timeout", "DB timeout while syncing", &[], embee.id).unwrap();
+        s.update_metadata(b.id, "Login page bug", "", &[], s.default_destination().unwrap().id).unwrap();
         s
     }
 
@@ -99,7 +153,7 @@ mod tests {
     fn hyphenated_query_finds_hyphenated_label() {
         let s = Store::open_in_memory(WATCH).unwrap();
         let a = s.insert_screenshot(&new_shot(&s, "a.png", "2026-09-26T01:00:00")).unwrap();
-        s.update_metadata(a.id, "api-timeout", "", s.default_destination().unwrap().id).unwrap();
+        s.update_metadata(a.id, "api-timeout", "", &[], s.default_destination().unwrap().id).unwrap();
         let q = |t: &str| ListQuery { q: t.into(), ..Default::default() };
         assert_eq!(names(&s.list_screenshots(&q("api-timeout")).unwrap()), ["a.png"]);
         assert_eq!(names(&s.list_screenshots(&q("api")).unwrap()), ["a.png"]);
@@ -147,11 +201,78 @@ mod tests {
     fn search_is_updated_after_edit_and_delete() {
         let s = seeded();
         let a = s.get_by_path(&format!("{WATCH}\\a.png")).unwrap().unwrap();
-        s.update_metadata(a.id, "renamed thing", "", a.destination_id).unwrap();
+        s.update_metadata(a.id, "renamed thing", "", &[], a.destination_id).unwrap();
         let q = |t: &str| ListQuery { q: t.into(), ..Default::default() };
         assert!(s.list_screenshots(&q("invoice")).unwrap().is_empty());
         assert_eq!(names(&s.list_screenshots(&q("renamed")).unwrap()), ["a.png"]);
         s.delete_screenshot(a.id).unwrap();
         assert!(s.list_screenshots(&q("renamed")).unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod tag_recent_and_count_tests {
+    use crate::store::screenshots::tests::{new_shot, WATCH};
+    use crate::store::Store;
+    use crate::{ListQuery, Status};
+
+    fn names(cards: &[crate::ScreenshotCard]) -> Vec<&str> {
+        cards.iter().map(|c| c.original_name.as_str()).collect()
+    }
+
+    fn seeded() -> (Store, i64, i64) {
+        let s = Store::open_in_memory(WATCH).unwrap();
+        let d = s.default_destination().unwrap().id;
+        let embee = s.create_destination("Embee", "D:\\Embee").unwrap().id;
+        let a = s.insert_screenshot(&new_shot(&s, "a.png", "2026-09-26T01:00:00")).unwrap();
+        let b = s.insert_screenshot(&new_shot(&s, "b.png", "2026-09-25T01:00:00")).unwrap();
+        let c = s.insert_screenshot(&new_shot(&s, "c.png", "2026-09-24T01:00:00")).unwrap();
+        let _d = s.insert_screenshot(&new_shot(&s, "d.png", "2026-09-23T01:00:00")).unwrap();
+        s.update_metadata(a.id, "Invoice", "", &["client-x".into(), "urgent".into()], embee).unwrap();
+        s.update_metadata(b.id, "Login bug", "", &["urgent".into()], d).unwrap();
+        s.update_metadata(c.id, "invoice", "", &[], d).unwrap();
+        // updated_at has second resolution; make c's save unambiguously the most recent.
+        s.conn.execute("UPDATE screenshots SET updated_at = datetime('now', '+2 seconds') WHERE id = ?1", [c.id]).unwrap();
+        s.set_status(c.id, Status::Missing).unwrap();
+        (s, d, embee)
+    }
+
+    #[test]
+    fn tag_filter_composes_and_search_finds_tags() {
+        let (s, _d, embee) = seeded();
+        let by_tag = ListQuery { tag: Some("urgent".into()), ..Default::default() };
+        assert_eq!(names(&s.list_screenshots(&by_tag).unwrap()), ["a.png", "b.png"]);
+        assert_eq!(s.list_screenshots(&by_tag).unwrap()[0].tags, vec!["client-x", "urgent"], "cards carry tags");
+        let both = ListQuery { tag: Some("urgent".into()), destination_id: Some(embee), ..Default::default() };
+        assert_eq!(names(&s.list_screenshots(&both).unwrap()), ["a.png"]);
+        let partial = ListQuery { tag: Some("urg".into()), ..Default::default() };
+        assert!(s.list_screenshots(&partial).unwrap().is_empty(), "tag filter is exact");
+        let search = ListQuery { q: "client".into(), ..Default::default() };
+        assert_eq!(names(&s.list_screenshots(&search).unwrap()), ["a.png"], "search covers tags");
+    }
+
+    #[test]
+    fn recent_labels_dedupe_case_insensitively_and_keep_the_last_destination() {
+        let (s, d, embee) = seeded();
+        let recent = s.recent_labels(5).unwrap();
+        let labels: Vec<(&str, i64)> = recent.iter().map(|r| (r.label.as_str(), r.destination_id)).collect();
+        // c ("invoice", default) was saved last, so the invoice entry points at Default; a's
+        // "Invoice" spelling is folded into it. Order is most recently used first.
+        assert_eq!(labels, [("invoice", d), ("Login bug", d)]);
+        assert_eq!(recent[0].destination_name, "Default");
+        assert_eq!(recent[0].uses, 2);
+        let _ = embee;
+        assert_eq!(s.recent_labels(1).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn library_counts_cover_totals_destinations_and_tags() {
+        let (s, d, embee) = seeded();
+        let c = s.library_counts().unwrap();
+        assert_eq!((c.total, c.unlabeled, c.missing), (4, 1, 1));
+        let by_dest: Vec<(i64, i64)> = c.by_destination.iter().map(|x| (x.destination_id, x.count)).collect();
+        assert_eq!(by_dest, [(d, 3), (embee, 1)]);
+        let tags: Vec<(&str, i64)> = c.tags.iter().map(|t| (t.tag.as_str(), t.count)).collect();
+        assert_eq!(tags, [("urgent", 2), ("client-x", 1)], "by count, then name");
     }
 }
