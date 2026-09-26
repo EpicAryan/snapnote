@@ -2,6 +2,7 @@ pub mod destinations;
 pub mod screenshots;
 pub mod settings;
 pub mod system;
+pub mod windows;
 
 use serde::Serialize;
 
