@@ -1,4 +1,4 @@
-import { forwardRef } from 'react'
+import { forwardRef, type ReactNode } from 'react'
 import type { Destination, Sort } from '../../lib/types'
 
 interface Props {
@@ -6,6 +6,7 @@ interface Props {
   destinations: Destination[]; destination: number | null; onDestination(v: number | null): void
   unlabeledOnly: boolean; onUnlabeledOnly(v: boolean): void
   sort: Sort; onSort(v: Sort): void
+  extra?: ReactNode
 }
 
 export const SearchBar = forwardRef<HTMLInputElement, Props>(function SearchBar(p, ref) {
@@ -26,6 +27,7 @@ export const SearchBar = forwardRef<HTMLInputElement, Props>(function SearchBar(
         <option value="newest">Newest first</option>
         <option value="oldest">Oldest first</option>
       </select>
+      {p.extra}
     </div>
   )
 })

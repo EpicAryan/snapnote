@@ -2,10 +2,11 @@ use super::{Empty, Progress};
 use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
 use crate::watch_folder;
-use snapnote_core::{import, thumbs, ImportReport};
+use snapnote_core::{capture, import, thumbs, ImportReport};
 use std::path::Path;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_opener::OpenerExt;
 
 /// The auto-detected Screenshots folder, ignoring any override (the settings UI shows both).
@@ -55,4 +56,20 @@ pub fn import_existing(app: AppHandle, state: State<'_, AppState>) -> CmdResult<
 #[tauri::command(async)]
 pub fn clear_thumbnail_cache(state: State<'_, AppState>) -> CmdResult<usize> {
     Ok(thumbs::clear_cache(&state.thumbs_dir)?)
+}
+
+/// Saves the clipboard image into the watch folder as a screenshot-named PNG. The watcher
+/// picks it up like any other screenshot, so it gets a toast and can be labeled.
+#[tauri::command(async)]
+pub fn paste_clipboard_image(app: AppHandle, state: State<'_, AppState>) -> CmdResult<String> {
+    let img = app.clipboard().read_image().map_err(|_| AppError::new("InvalidInput", "No image on the clipboard"))?;
+    let folder = state.watch_folder();
+    let path = capture::save_capture_now(&folder, img.rgba(), img.width(), img.height())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Re-checks every tracked file against the disk. Returns how many rows changed status.
+#[tauri::command(async)]
+pub fn reconcile_now(app: AppHandle) -> CmdResult<usize> {
+    crate::reconcile::run(&app)
 }

@@ -30,6 +30,14 @@ export interface Commands {
   revealFile(id: number): Promise<void>
   removeFromLibrary(id: number): Promise<void>
   deleteFile(id: number): Promise<void>
+  /** Puts the screenshot's pixels on the clipboard. */
+  copyImage(id: number): Promise<void>
+  /** Saves the clipboard image into the watch folder as a new screenshot; resolves to its path. */
+  pasteClipboardImage(): Promise<string>
+  /** Re-checks every tracked file on disk; resolves to how many rows changed status. */
+  reconcileNow(): Promise<number>
+  /** Native yes/no dialog. */
+  confirm(message: string, title?: string): Promise<boolean>
 
   listDestinations(): Promise<Destination[]>
   createDestination(name: string, path: string): Promise<Destination>

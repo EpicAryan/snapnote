@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CommandsProvider } from '../../lib/CommandsContext'
 import { createMockCommands } from '../../lib/commands.mock'
 import { Library } from './Library'
@@ -15,6 +15,8 @@ async function setup() {
 }
 
 const cardNames = () => screen.getAllByTestId('card').map((c) => within(c).getByTestId('card-title').textContent)
+
+afterEach(() => vi.useRealTimers())
 
 describe('Library', () => {
   it('lists all screenshots newest first with label or filename, destination and date', async () => {
@@ -123,6 +125,67 @@ describe('Library', () => {
     expect(cards[1]).toHaveAttribute('aria-selected', 'true')
     fireEvent.keyDown(document.body, { key: 'Escape' })
     expect(screen.getByText('PANEL CLOSED')).toBeInTheDocument()
+  })
+
+  it('Delete asks for confirmation, then sends the file to the Recycle Bin', async () => {
+    const { mock } = await setup()
+    fireEvent.click(screen.getAllByTestId('card')[0])
+    fireEvent.keyDown(screen.getByTestId('grid'), { key: 'Delete' })
+    await waitFor(() => expect(mock.calls).toContainEqual(['confirm', expect.stringContaining('Recycle Bin')]))
+    await waitFor(() => expect(mock.calls).toContainEqual(['deleteFile', 1]))
+    await waitFor(() => expect(cardNames()).toEqual(['Login page bug', 'Screenshot 2026-09-25 120602.png']))
+  })
+
+  it('a declined confirmation deletes nothing', async () => {
+    const { mock } = await setup()
+    mock.setConfirmResult(false)
+    fireEvent.click(screen.getAllByTestId('card')[0])
+    fireEvent.keyDown(screen.getByTestId('grid'), { key: 'Delete' })
+    await waitFor(() => expect(mock.calls).toContainEqual(['confirm', expect.any(String)]))
+    expect(mock.calls).not.toContainEqual(['deleteFile', 1])
+    expect(cardNames()).toHaveLength(3)
+  })
+
+  it('Delete on a missing card only forgets the entry', async () => {
+    const mock = createMockCommands({ screenshots: [{ status: 'missing', label: 'lost' }] })
+    render(<CommandsProvider commands={mock.commands}><Library /></CommandsProvider>)
+    fireEvent.click((await screen.findAllByTestId('card'))[0])
+    fireEvent.keyDown(screen.getByTestId('grid'), { key: 'Delete' })
+    await waitFor(() => expect(mock.calls).toContainEqual(['confirm', expect.stringContaining('already gone')]))
+    await waitFor(() => expect(mock.state.screenshots).toHaveLength(0))
+    expect(mock.calls).not.toContainEqual(['deleteFile', 1])
+  })
+
+  it('Ctrl+C copies the selected screenshot and says so', async () => {
+    const { mock } = await setup()
+    fireEvent.click(screen.getAllByTestId('card')[1])
+    fireEvent.keyDown(document.body, { key: 'c', ctrlKey: true })
+    await waitFor(() => expect(mock.calls).toContainEqual(['copyImage', 2]))
+    await screen.findByText(/Copied/)
+  })
+
+  it('Ctrl+V and the Paste button save the clipboard image into the Screenshots folder', async () => {
+    const { mock } = await setup()
+    fireEvent.keyDown(document.body, { key: 'v', ctrlKey: true })
+    await waitFor(() => expect(mock.calls).toContainEqual(['pasteClipboardImage']))
+    await screen.findByText(/Saved clipboard image/)
+    mock.setClipboardHasImage(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Paste image' }))
+    await screen.findByText(/No image on the clipboard/)
+  })
+
+  it('re-checks files on disk every minute', async () => {
+    vi.useFakeTimers()
+    try {
+      const mock = createMockCommands()
+      render(<CommandsProvider commands={mock.commands}><Library /></CommandsProvider>)
+      await act(async () => { await Promise.resolve() })
+      expect(mock.calls).not.toContainEqual(['reconcileNow'])
+      await act(async () => { vi.advanceTimersByTime(60_000) })
+      expect(mock.calls).toContainEqual(['reconcileNow'])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('shows the empty state when nothing matches', async () => {

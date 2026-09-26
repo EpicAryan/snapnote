@@ -5,6 +5,7 @@ use base64::Engine;
 use snapnote_core::{files, save, thumbs, CoreError, DestinationChoice, ListQuery, SaveResult, Screenshot, ScreenshotCard, Status};
 use std::path::Path;
 use tauri::{AppHandle, Emitter, State};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_opener::OpenerExt;
 
 #[tauri::command(async)]
@@ -53,12 +54,13 @@ pub fn retry_move(app: AppHandle, state: State<'_, AppState>, id: i64) -> CmdRes
 }
 
 #[tauri::command(async)]
-pub fn get_thumbnail(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
+pub fn get_thumbnail(app: AppHandle, state: State<'_, AppState>, id: i64) -> CmdResult<String> {
     let shot = state.store()?.get_screenshot(id)?;
     let out = match thumbs::ensure_thumbnail(&state.thumbs_dir, id, Path::new(&shot.path), thumbs::THUMB_WIDTH) {
         Ok(p) => p,
         Err(CoreError::FileMissing(m)) => {
             let _ = state.store()?.set_status(id, Status::Missing);
+            let _ = app.emit("screenshot:updated", IdPayload { id });
             return Err(CoreError::FileMissing(m).into());
         }
         Err(e) => return Err(e.into()),
@@ -79,8 +81,8 @@ pub fn data_url(bytes: &[u8]) -> String {
 const MAX_PREVIEW_BYTES: u64 = 40 * 1024 * 1024;
 
 #[tauri::command(async)]
-pub fn get_image_data_url(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
-    let path = existing_path(&state, id)?;
+pub fn get_image_data_url(app: AppHandle, state: State<'_, AppState>, id: i64) -> CmdResult<String> {
+    let path = existing_path(&app, &state, id)?;
     let meta = std::fs::metadata(&path)?;
     if meta.len() > MAX_PREVIEW_BYTES {
         return Err(AppError::new("InvalidInput", "image is too large to preview"));
@@ -88,11 +90,13 @@ pub fn get_image_data_url(state: State<'_, AppState>, id: i64) -> CmdResult<Stri
     Ok(data_url(&std::fs::read(&path)?))
 }
 
-/// The screenshot's path if the file exists; otherwise flags the row missing and fails.
-fn existing_path(state: &State<'_, AppState>, id: i64) -> CmdResult<String> {
+/// The screenshot's path if the file exists; otherwise flags the row missing, tells the
+/// library so the card updates, and fails.
+fn existing_path(app: &AppHandle, state: &State<'_, AppState>, id: i64) -> CmdResult<String> {
     let shot = state.store()?.get_screenshot(id)?;
     if !Path::new(&shot.path).is_file() {
         state.store()?.set_status(id, Status::Missing)?;
+        let _ = app.emit("screenshot:updated", IdPayload { id });
         return Err(AppError::new("FileMissing", format!("{} no longer exists", shot.path)));
     }
     Ok(shot.path)
@@ -100,14 +104,22 @@ fn existing_path(state: &State<'_, AppState>, id: i64) -> CmdResult<String> {
 
 #[tauri::command(async)]
 pub fn open_file(app: AppHandle, state: State<'_, AppState>, id: i64) -> CmdResult<()> {
-    let path = existing_path(&state, id)?;
+    let path = existing_path(&app, &state, id)?;
     app.opener().open_path(path, None::<&str>).map_err(|e| AppError::new("Io", e.to_string()))
 }
 
 #[tauri::command(async)]
 pub fn reveal_file(app: AppHandle, state: State<'_, AppState>, id: i64) -> CmdResult<()> {
-    let path = existing_path(&state, id)?;
+    let path = existing_path(&app, &state, id)?;
     app.opener().reveal_item_in_dir(&path).map_err(|e| AppError::new("Io", e.to_string()))
+}
+
+/// Puts the screenshot's pixels on the clipboard so it can be pasted into any app.
+#[tauri::command(async)]
+pub fn copy_image(app: AppHandle, state: State<'_, AppState>, id: i64) -> CmdResult<()> {
+    let path = existing_path(&app, &state, id)?;
+    let img = tauri::image::Image::from_path(&path)?;
+    app.clipboard().write_image(&img).map_err(|e| AppError::new("Io", format!("Could not copy to the clipboard: {e}")))
 }
 
 #[tauri::command(async)]

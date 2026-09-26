@@ -83,6 +83,7 @@ export function SidePanel({ id, onChanged, onClose }: { id: number | null; onCha
       <div className="flex flex-wrap gap-2">
         {shot.status === 'present' && <button className={btn} onClick={() => void cmd.openFile(shot.id)}>Open</button>}
         {shot.status === 'present' && <button className={btn} onClick={() => void cmd.revealFile(shot.id)}>Reveal in Explorer</button>}
+        {shot.status === 'present' && <button className={btn} onClick={() => void cmd.copyImage(shot.id).then(() => setMsg({ text: 'Copied image to the clipboard', tone: 'ok' }), (e) => setMsg({ text: errorMessage(e), tone: 'err' }))}>Copy image</button>}
         {shot.pending_move_to != null && <button className={`${btn} bg-amber-800`} onClick={() => void after(cmd.retryMove(shot.id))}>Retry move</button>}
         <ConfirmButton className={btn} label="Remove from library" confirmLabel="Confirm remove" onConfirm={() => { void cmd.removeFromLibrary(shot.id).then(() => { setShot(null); onChanged() }) }} />
         {shot.status === 'present' && <ConfirmButton className={btn} label="Delete file" confirmLabel="Confirm delete" onConfirm={() => { void cmd.deleteFile(shot.id).then(() => { setShot(null); onChanged() }) }} />}

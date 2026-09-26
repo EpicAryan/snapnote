@@ -86,11 +86,19 @@ describe('SidePanel', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  it('Copy image puts the screenshot on the clipboard', async () => {
+    const { mock } = await setup(2)
+    fireEvent.click(screen.getByRole('button', { name: 'Copy image' }))
+    await waitFor(() => expect(mock.calls).toContainEqual(['copyImage', 2]))
+    await screen.findByText(/Copied/)
+  })
+
   it('missing rows show the badge and hide Open/Reveal/Delete file', async () => {
     await setup(1, { screenshots: [{ status: 'missing' }] })
     expect(screen.getByText('Missing')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Open' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Delete file' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Copy image' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Remove from library' })).toBeInTheDocument()
   })
 })

@@ -1,5 +1,6 @@
 //! snapnote-core: everything that does not need Tauri.
 
+pub mod capture;
 pub mod captured_at;
 pub mod error;
 pub mod files;
