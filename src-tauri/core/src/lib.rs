@@ -11,6 +11,7 @@ pub mod save;
 pub mod slug;
 pub mod store;
 pub mod thumbs;
+pub mod watcher;
 
 pub use error::{CoreError, Result};
 pub use model::*;
