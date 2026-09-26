@@ -1,5 +1,7 @@
 pub mod destinations;
 pub mod paths;
+pub mod screenshots;
+pub mod settings;
 
 use crate::{CoreError, Result};
 use rusqlite::Connection;
