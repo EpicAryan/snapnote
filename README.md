@@ -19,7 +19,3 @@ C++ compiler and a Windows SDK, WebView2 runtime (present on Windows 11).
     npm run tauri dev        # runs the app with hot reload
     npm test                 # frontend tests (Vitest)
     cd src-tauri; cargo test --workspace   # Rust tests (core crate + app)
-
-Design spec: `docs/superpowers/specs/2026-09-26-snapnote-design.md`.
-Implementation plan: `docs/superpowers/plans/2026-09-26-snapnote-v1.md`.
-Release checklist: `docs/smoke-checklist.md`.
