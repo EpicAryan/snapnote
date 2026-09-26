@@ -10,6 +10,7 @@ pub mod reconcile;
 pub mod save;
 pub mod slug;
 pub mod store;
+pub mod thumbs;
 
 pub use error::{CoreError, Result};
 pub use model::*;
