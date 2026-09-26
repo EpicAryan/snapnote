@@ -1,6 +1,7 @@
 pub mod destinations;
 pub mod paths;
 pub mod screenshots;
+pub mod search;
 pub mod settings;
 
 use crate::{CoreError, Result};
