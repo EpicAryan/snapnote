@@ -17,13 +17,18 @@ pub fn set_setting(app: AppHandle, state: State<'_, AppState>, key: String, valu
     Ok(())
 }
 
-/// Settings that change live behaviour. Task 19 adds the watch folder arm.
+/// Settings that change live behaviour.
 pub fn apply_side_effects(app: &AppHandle, key: &str, value: &str) {
     match key {
         "label_hotkey" => {
             let _ = crate::hotkey::register_label_hotkey(app, value);
         }
         "autostart" => crate::autostart::apply(app, value == "true"),
+        "watch_folder_override" => {
+            if let Err(e) = crate::watch::start(app) {
+                eprintln!("restart watcher: {e}");
+            }
+        }
         _ => {}
     }
 }

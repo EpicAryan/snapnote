@@ -4,6 +4,7 @@ mod error;
 mod hotkey;
 mod state;
 mod tray;
+mod watch;
 mod watch_folder;
 mod windows;
 
@@ -34,7 +35,23 @@ pub fn run() {
         .setup(|app| {
             let data_dir = app.path().local_data_dir()?.join("snapnote");
             std::fs::create_dir_all(&data_dir)?;
-            let store = Store::open(&data_dir.join("snapnote.db"), &watch_folder::detected_default().to_string_lossy())?;
+            let db_path = data_dir.join("snapnote.db");
+            // A database we cannot open is fatal and must be explained, never silently recreated.
+            let store = match Store::open(&db_path, &watch_folder::detected_default().to_string_lossy()) {
+                Ok(s) => s,
+                Err(e) => {
+                    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                    app.dialog()
+                        .message(format!(
+                            "snapnote cannot open its database at {}:\n{e}\n\nThe file has been left untouched. Fix or move it, then start snapnote again.",
+                            db_path.display()
+                        ))
+                        .title("snapnote cannot start")
+                        .kind(MessageDialogKind::Error)
+                        .blocking_show();
+                    return Err(Box::new(e));
+                }
+            };
             let settings = store.get_settings()?;
             let folder = watch_folder::resolve_from_settings(&settings);
             store.set_default_destination_path(&folder.to_string_lossy())?;
@@ -47,13 +64,28 @@ pub fn run() {
                 watcher: Mutex::new(None),
                 hotkey_error: Mutex::new(None),
             });
+
             windows::restore_library_bounds(app.handle());
             tray::build(app.handle())?;
-            let startup_settings = app.state::<AppState>().store()?.get_settings()?;
-            let _ = hotkey::register_label_hotkey(app.handle(), &startup_settings.label_hotkey);
-            autostart::apply(app.handle(), startup_settings.autostart);
-            // In `tauri dev` there is no tray yet (Task 18) and all windows start hidden,
-            // so show the library so there is something to look at.
+            let _ = hotkey::register_label_hotkey(app.handle(), &settings.label_hotkey);
+            autostart::apply(app.handle(), settings.autostart);
+            watch::start(app.handle())?;
+
+            // Flag rows whose files vanished while we were not running. Off the main thread:
+            // it walks every tracked path.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let state = handle.state::<AppState>();
+                let store = state.store();
+                if let Ok(store) = store {
+                    match snapnote_core::reconcile::mark_missing(&store) {
+                        Ok(n) if n > 0 => eprintln!("reconcile: {n} file(s) now missing"),
+                        Ok(_) => {}
+                        Err(e) => eprintln!("reconcile: {e}"),
+                    }
+                }
+            });
+
             #[cfg(debug_assertions)]
             windows::show_library(app.handle());
             Ok(())
@@ -77,6 +109,15 @@ pub fn run() {
             commands::windows::hide_popup,
             commands::windows::label_last_screenshot,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running snapnote");
+        .build(tauri::generate_context!())
+        .expect("error while building snapnote")
+        .run(|_app, event| {
+            // All windows are hidden rather than destroyed, so this only fires on an explicit
+            // exit; the guard keeps the tray alive if a future change destroys a window.
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+                if code.is_none() {
+                    api.prevent_exit();
+                }
+            }
+        });
 }
