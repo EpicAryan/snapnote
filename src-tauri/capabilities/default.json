@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "snapnote windows",
+  "windows": ["library", "popup", "toast"],
+  "permissions": ["core:default", "dialog:allow-open"]
+}

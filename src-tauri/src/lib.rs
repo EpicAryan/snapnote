@@ -1,0 +1,146 @@
+mod autostart;
+mod commands;
+mod error;
+mod hotkey;
+mod startup;
+mod state;
+mod tray;
+mod watch;
+mod watch_folder;
+mod windows;
+
+use snapnote_core::store::Store;
+use state::AppState;
+use std::sync::Mutex;
+use tauri::Manager;
+
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            windows::show_library(app);
+        }))
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Closing any window hides it; the app lives in the tray. Quit is in the tray menu.
+                api.prevent_close();
+                if window.label() == windows::LIBRARY {
+                    windows::save_library_bounds(window.app_handle());
+                }
+                let _ = window.hide();
+            }
+        })
+        .setup(|app| {
+            let data_dir = app.path().local_data_dir()?.join("snapnote");
+            std::fs::create_dir_all(&data_dir)?;
+            let db_path = data_dir.join("snapnote.db");
+            // A database we cannot open is fatal and must be explained, never silently recreated.
+            let store = match Store::open(&db_path, &watch_folder::detected_default().to_string_lossy()) {
+                Ok(s) => s,
+                Err(e) => {
+                    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                    app.dialog()
+                        .message(format!(
+                            "snapnote cannot open its database at {}:\n{e}\n\nThe file has been left untouched. Fix or move it, then start snapnote again.",
+                            db_path.display()
+                        ))
+                        .title("snapnote cannot start")
+                        .kind(MessageDialogKind::Error)
+                        .blocking_show();
+                    return Err(Box::new(e));
+                }
+            };
+            let settings = store.get_settings()?;
+            let folder = watch_folder::resolve_from_settings(&settings);
+            store.set_default_destination_path(&folder.to_string_lossy())?;
+            app.manage(AppState {
+                store: Mutex::new(store),
+                thumbs_dir: data_dir.join("thumbs"),
+                data_dir,
+                watch_folder: Mutex::new(folder),
+                toast_id: Mutex::new(None),
+                watcher: Mutex::new(None),
+                hotkey_error: Mutex::new(None),
+            });
+
+            windows::restore_library_bounds(app.handle());
+            tray::build(app.handle())?;
+            let _ = hotkey::register_label_hotkey(app.handle(), &settings.label_hotkey);
+            autostart::apply(app.handle(), settings.autostart);
+            watch::start(app.handle())?;
+
+            // Flag rows whose files vanished while we were not running. Off the main thread, and
+            // the existence checks (thousands of paths, possibly on OneDrive) run without the
+            // store lock so commands keep working meanwhile.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let state = handle.state::<AppState>();
+                let rows = state.store().and_then(|store| Ok(store.all_rows_status()?));
+                let rows = match rows {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("reconcile: {e}");
+                        return;
+                    }
+                };
+                let changes = snapnote_core::reconcile::plan(&rows, |p| p.exists());
+                if changes.is_empty() {
+                    return;
+                }
+                let applied = state.store().and_then(|store| Ok(snapnote_core::reconcile::apply(&store, &changes)?));
+                match applied {
+                    Ok(n) if n > 0 => eprintln!("reconcile: {n} file(s) now missing"),
+                    Ok(_) => {}
+                    Err(e) => eprintln!("reconcile: {e}"),
+                }
+            });
+
+            if startup::should_show_library(settings.first_run_done, cfg!(debug_assertions)) {
+                windows::show_library(app.handle());
+            }
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::screenshots::list_screenshots,
+            commands::screenshots::get_screenshot,
+            commands::destinations::list_destinations,
+            commands::destinations::create_destination,
+            commands::destinations::update_destination,
+            commands::destinations::delete_destination,
+            commands::destinations::reorder_destinations,
+            commands::settings::get_settings,
+            commands::settings::set_setting,
+            commands::system::detect_watch_folder,
+            commands::system::folder_exists,
+            commands::system::create_folder,
+            commands::system::open_data_folder,
+            commands::windows::hide_toast,
+            commands::windows::open_popup_for,
+            commands::windows::hide_popup,
+            commands::windows::label_last_screenshot,
+            commands::screenshots::save_metadata,
+            commands::screenshots::retry_move,
+            commands::screenshots::get_thumbnail,
+            commands::screenshots::get_image_data_url,
+            commands::screenshots::open_file,
+            commands::screenshots::reveal_file,
+            commands::screenshots::remove_from_library,
+            commands::screenshots::delete_file,
+            commands::system::import_existing,
+            commands::system::clear_thumbnail_cache,
+        ])
+        .build(tauri::generate_context!())
+        .expect("error while building snapnote")
+        .run(|_app, event| {
+            // All windows are hidden rather than destroyed, so this only fires on an explicit
+            // exit; the guard keeps the tray alive if a future change destroys a window.
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+                if code.is_none() {
+                    api.prevent_exit();
+                }
+            }
+        });
+}
