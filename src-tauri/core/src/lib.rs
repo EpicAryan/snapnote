@@ -3,6 +3,7 @@
 pub mod captured_at;
 pub mod error;
 pub mod files;
+pub mod ingest;
 pub mod model;
 pub mod slug;
 pub mod store;
