@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { DestinationSelect } from '../../components/DestinationSelect'
+import { TagInput } from '../../components/TagInput'
 import { useCommands } from '../../lib/CommandsContext'
-import type { Destination, DestinationChoice, SaveResult, Screenshot } from '../../lib/types'
+import type { Destination, DestinationChoice, RecentLabel, SaveResult, Screenshot } from '../../lib/types'
 import { errorMessage } from '../../lib/types'
 
 type Phase =
@@ -26,6 +27,8 @@ export function Popup() {
   const [destinations, setDestinations] = useState<Destination[]>([])
   const [label, setLabel] = useState('')
   const [notes, setNotes] = useState('')
+  const [tags, setTags] = useState<string[]>([])
+  const [recent, setRecent] = useState<RecentLabel[]>([])
   const [choice, setChoice] = useState<DestinationChoice>({ kind: 'existing', id: 0 })
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' })
   const labelRef = useRef<HTMLInputElement>(null)
@@ -35,7 +38,7 @@ export function Popup() {
 
   const reset = () => {
     editingId.current = null
-    setShot(null); setThumb(null); setLabel(''); setNotes(''); setPhase({ kind: 'idle' })
+    setShot(null); setThumb(null); setLabel(''); setNotes(''); setTags([]); setRecent([]); setPhase({ kind: 'idle' })
   }
 
   useEffect(() => {
@@ -46,11 +49,11 @@ export function Popup() {
         return
       }
       try {
-        const [s, dests] = await Promise.all([cmd.getScreenshot(id), cmd.listDestinations()])
+        const [s, dests, rec] = await Promise.all([cmd.getScreenshot(id), cmd.listDestinations(), cmd.recentLabels().catch(() => [] as RecentLabel[])])
         let t: string | null = null
         try { t = await cmd.thumbnailUrl(id) } catch { t = null }
-        setShot(s); setThumb(t); setDestinations(dests)
-        setLabel(s.label); setNotes(s.notes)
+        setShot(s); setThumb(t); setDestinations(dests); setRecent(rec)
+        setLabel(s.label); setNotes(s.notes); setTags(s.tags)
         setChoice({ kind: 'existing', id: s.destination_id })
         setPhase({ kind: 'editing' })
         editingId.current = s.id
@@ -77,7 +80,7 @@ export function Popup() {
     setPhase({ kind: 'saving' })
     editingId.current = null
     try {
-      const r = await cmd.saveMetadata(shot.id, label, notes, choice)
+      const r = await cmd.saveMetadata(shot.id, label, notes, tags, choice)
       const text = r.warning ?? describeResult(r)
       setPhase({ kind: 'done', text, warning: !!r.warning })
       setTimeout(close, r.warning ? 2500 : 1200)
@@ -110,10 +113,23 @@ export function Popup() {
       <label className="text-xs text-neutral-400" htmlFor="label">Label</label>
       <input id="label" ref={labelRef} value={label} maxLength={120} disabled={busy} onChange={(e) => setLabel(e.target.value)}
         className="rounded border border-neutral-600 bg-neutral-800 px-2 py-1 text-sm" />
+      {recent.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1 text-xs">
+          <span className="text-neutral-500">Recent:</span>
+          {recent.map((r) => (
+            <button key={r.label} type="button" disabled={busy} title={`Use “${r.label}” and save to ${r.destination_name}`}
+              className="rounded bg-neutral-800 px-1.5 py-0.5 hover:bg-neutral-700"
+              onClick={() => { setLabel(r.label); setChoice({ kind: 'existing', id: r.destination_id }); labelRef.current?.focus() }}>{r.label}</button>
+          ))}
+        </div>
+      )}
 
       <label className="text-xs text-neutral-400" htmlFor="notes">Notes</label>
       <textarea id="notes" value={notes} rows={3} disabled={busy} onChange={(e) => setNotes(e.target.value)}
         className="rounded border border-neutral-600 bg-neutral-800 px-2 py-1 text-sm" />
+
+      <span className="text-xs text-neutral-400">Tags</span>
+      <TagInput value={tags} onChange={setTags} disabled={busy} />
 
       <label className="text-xs text-neutral-400" htmlFor="destination">Save to</label>
       <DestinationSelect id="destination" destinations={destinations} value={choice} onChange={setChoice} onBrowse={() => cmd.pickFolder()} disabled={busy} />

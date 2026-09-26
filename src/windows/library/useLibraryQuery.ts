@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useCommands } from '../../lib/CommandsContext'
 import { useDebounced } from '../../lib/useDebounced'
-import type { ListQuery, ScreenshotCard, Sort } from '../../lib/types'
+import type { LibraryCounts, ListQuery, ScreenshotCard, Sort } from '../../lib/types'
 
 export const PAGE_SIZE = 200
 
@@ -10,8 +10,10 @@ export function useLibraryQuery() {
   const [q, setQ] = useState('')
   const [destination, setDestination] = useState<number | null>(null)
   const [unlabeledOnly, setUnlabeledOnly] = useState(false)
+  const [tag, setTag] = useState<string | null>(null)
   const [sort, setSort] = useState<Sort>('newest')
   const [cards, setCards] = useState<ScreenshotCard[]>([])
+  const [counts, setCounts] = useState<LibraryCounts | null>(null)
   const [loading, setLoading] = useState(true)
   const [pages, setPages] = useState(1)
   const [hasMore, setHasMore] = useState(false)
@@ -19,8 +21,8 @@ export function useLibraryQuery() {
   const debouncedQ = useDebounced(q, 150)
 
   const filters = useMemo<Partial<ListQuery>>(
-    () => ({ q: debouncedQ, destination_id: destination, unlabeled_only: unlabeledOnly, sort }),
-    [debouncedQ, destination, unlabeledOnly, sort],
+    () => ({ q: debouncedQ, destination_id: destination, unlabeled_only: unlabeledOnly, tag, sort }),
+    [debouncedQ, destination, unlabeledOnly, tag, sort],
   )
 
   // A new filter set starts again from the first page.
@@ -30,12 +32,14 @@ export function useLibraryQuery() {
     const mine = ++seq.current
     setLoading(true)
     try {
-      const results = await Promise.all(
-        Array.from({ length: pages }, (_, i) => cmd.listScreenshots({ ...filters, limit: PAGE_SIZE, offset: i * PAGE_SIZE })),
-      )
+      const [results, c] = await Promise.all([
+        Promise.all(Array.from({ length: pages }, (_, i) => cmd.listScreenshots({ ...filters, limit: PAGE_SIZE, offset: i * PAGE_SIZE }))),
+        cmd.libraryCounts().catch(() => null),
+      ])
       if (mine !== seq.current) return // a newer request superseded this one
       setCards(results.flat())
       setHasMore((results[results.length - 1]?.length ?? 0) === PAGE_SIZE)
+      if (c) setCounts(c)
     } finally {
       if (mine === seq.current) setLoading(false)
     }
@@ -52,5 +56,5 @@ export function useLibraryQuery() {
 
   const loadMore = useCallback(() => setPages((p) => p + 1), [])
 
-  return { q, setQ, destination, setDestination, unlabeledOnly, setUnlabeledOnly, sort, setSort, cards, loading, reload, hasMore, loadMore }
+  return { q, setQ, destination, setDestination, unlabeledOnly, setUnlabeledOnly, tag, setTag, sort, setSort, cards, counts, loading, reload, hasMore, loadMore }
 }

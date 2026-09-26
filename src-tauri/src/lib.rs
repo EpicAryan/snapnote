@@ -1,4 +1,5 @@
 mod autostart;
+mod clipboard;
 mod commands;
 mod error;
 mod hotkey;
@@ -6,6 +7,7 @@ mod reconcile;
 mod startup;
 mod state;
 mod tray;
+mod undo;
 mod watch;
 mod watch_folder;
 mod windows;
@@ -37,6 +39,10 @@ pub fn run() {
             // Coming back to the library (typically from Explorer) re-checks files on disk.
             tauri::WindowEvent::Focused(true) if window.label() == windows::LIBRARY => {
                 reconcile::spawn(window.app_handle());
+            }
+            // The normal geometry is only readable while not maximized, so it is noted as it changes.
+            tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_) if window.label() == windows::LIBRARY => {
+                windows::note_library_bounds(window);
             }
             _ => {}
         })
@@ -71,6 +77,8 @@ pub fn run() {
                 toast_id: Mutex::new(None),
                 watcher: Mutex::new(None),
                 hotkey_error: Mutex::new(None),
+                library_placement: Mutex::new(Default::default()),
+                undo: Mutex::new(None),
             });
 
             windows::restore_library_bounds(app.handle());
@@ -112,12 +120,18 @@ pub fn run() {
             commands::screenshots::open_file,
             commands::screenshots::reveal_file,
             commands::screenshots::remove_from_library,
-            commands::screenshots::delete_file,
+            commands::screenshots::delete_screenshots,
+            commands::screenshots::undo_delete,
+            commands::screenshots::copy_screenshots,
+            commands::screenshots::move_screenshots,
+            commands::screenshots::add_tags,
             commands::system::import_existing,
             commands::system::clear_thumbnail_cache,
-            commands::screenshots::copy_image,
-            commands::system::paste_clipboard_image,
+            commands::system::paste_clipboard,
+            commands::system::add_files,
             commands::system::reconcile_now,
+            commands::system::recent_labels,
+            commands::system::library_counts,
         ])
         .build(tauri::generate_context!())
         .expect("error while building snapnote")

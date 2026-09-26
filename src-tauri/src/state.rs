@@ -1,4 +1,6 @@
 use crate::error::CmdResult;
+use crate::undo::UndoBatch;
+use crate::windows::LibraryPlacement;
 use snapnote_core::store::Store;
 use snapnote_core::watcher::WatcherHandle;
 use std::path::PathBuf;
@@ -14,6 +16,10 @@ pub struct AppState {
     pub watcher: Mutex<Option<WatcherHandle>>,
     /// Last hotkey registration failure, replayed to the library when it opens.
     pub hotkey_error: Mutex<Option<String>>,
+    /// The library window's last normal geometry and whether it should come up maximized.
+    pub library_placement: Mutex<LibraryPlacement>,
+    /// The last delete batch, undoable until the next delete.
+    pub undo: Mutex<Option<UndoBatch>>,
 }
 
 impl AppState {

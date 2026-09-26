@@ -8,7 +8,10 @@ use crate::{CoreError, Result};
 use rusqlite::Connection;
 use std::path::Path;
 
-const MIGRATIONS: &[(i32, &str)] = &[(1, include_str!("../../migrations/0001_init.sql"))];
+const MIGRATIONS: &[(i32, &str)] = &[
+    (1, include_str!("../../migrations/0001_init.sql")),
+    (2, include_str!("../../migrations/0002_tags.sql")),
+];
 
 pub struct Store {
     pub(crate) conn: Connection,
@@ -63,5 +66,32 @@ impl Store {
 
     pub(crate) fn invalid<T>(msg: impl Into<String>) -> Result<T> {
         Err(CoreError::InvalidInput(msg.into()))
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+    use crate::ListQuery;
+
+    #[test]
+    fn a_version_1_database_gains_tags_and_keeps_searching() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&format!("BEGIN; {} PRAGMA user_version = 1; COMMIT;", MIGRATIONS[0].1)).unwrap();
+        conn.execute("INSERT INTO destinations(name, path, sort_order, is_default) VALUES ('Default', 'C:\\Shots', -1, 1)", []).unwrap();
+        conn.execute(
+            "INSERT INTO screenshots(path, original_name, captured_at, size_bytes, hash, label, notes, destination_id) VALUES ('C:\\Shots\\a.png', 'a.png', '2026-09-26T01:00:00', 1, 'h', 'Old label', 'old notes', 1)",
+            [],
+        )
+        .unwrap();
+
+        let store = Store::init(conn, "C:\\Shots").unwrap();
+        assert_eq!(store.schema_version().unwrap(), 2);
+        let shot = store.get_by_path("C:\\Shots\\a.png").unwrap().unwrap();
+        assert!(shot.tags.is_empty());
+        let q = |t: &str| ListQuery { q: t.into(), ..Default::default() };
+        assert_eq!(store.list_screenshots(&q("old")).unwrap().len(), 1, "FTS was rebuilt with the existing rows");
+        store.update_metadata(shot.id, "Old label", "old notes", &["fresh".into()], 1).unwrap();
+        assert_eq!(store.list_screenshots(&q("fresh")).unwrap().len(), 1, "tags are searchable after the migration");
     }
 }

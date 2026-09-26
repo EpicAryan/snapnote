@@ -1,28 +1,51 @@
-import type { KeyboardEvent } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, type MouseEvent } from 'react'
 import type { ScreenshotCard } from '../../lib/types'
 import { Card } from './Card'
 
-interface Props { cards: ScreenshotCard[]; selectedId: number | null; onSelect(id: number): void; onOpen(id: number): void; onDeleteRequest(id: number): void }
+interface Props {
+  cards: ScreenshotCard[]
+  selected: Set<number>
+  cursorId: number | null
+  emptyText: string
+  onSelect(id: number, e: MouseEvent): void
+  onOpen(id: number): void
+  onMenu(id: number, x: number, y: number): void
+}
 
-export function Grid({ cards, selectedId, onSelect, onOpen, onDeleteRequest }: Props) {
-  const idx = cards.findIndex((c) => c.id === selectedId)
-  const move = (delta: number) => { const next = cards[Math.min(cards.length - 1, Math.max(0, (idx < 0 ? 0 : idx) + delta))]; if (next) onSelect(next.id) }
-  const onKeyDown = (e: KeyboardEvent) => {
-    const cols = Math.max(1, Math.floor((e.currentTarget as HTMLElement).clientWidth / 220) || 4)
-    switch (e.key) {
-      case 'ArrowRight': e.preventDefault(); move(1); break
-      case 'ArrowLeft': e.preventDefault(); move(-1); break
-      case 'ArrowDown': e.preventDefault(); move(cols); break
-      case 'ArrowUp': e.preventDefault(); move(-cols); break
-      case 'Enter': if (selectedId != null) { e.preventDefault(); onOpen(selectedId) } break
-      case 'Delete': if (selectedId != null) { e.preventDefault(); onDeleteRequest(selectedId) } break
-    }
-  }
-  if (cards.length === 0) return <div className="p-8 text-center text-sm text-neutral-500">No screenshots match.</div>
+/** How many cards share the first row. Falls back to a guess where there is no layout (tests). */
+export function columnsOf(grid: HTMLElement | null): number {
+  if (!grid) return 1
+  const els = Array.from(grid.querySelectorAll<HTMLElement>('[data-card]'))
+  if (els.length < 2) return 1
+  const top = els[0].offsetTop
+  const wrap = els.findIndex((el, i) => i > 0 && el.offsetTop !== top)
+  if (wrap > 0) return wrap
+  return grid.clientWidth > 0 ? els.length : 4
+}
+
+/** The card grid. Keyboard handling lives in Library so it works wherever focus is. */
+export const Grid = forwardRef<HTMLDivElement, Props>(function Grid({ cards, selected, cursorId, emptyText, onSelect, onOpen, onMenu }, ref) {
+  const inner = useRef<HTMLDivElement>(null)
+  useImperativeHandle(ref, () => inner.current as HTMLDivElement)
+
+  useEffect(() => {
+    if (cursorId == null) return
+    const el = inner.current?.querySelector<HTMLElement>(`[data-card="${cursorId}"]`)
+    el?.scrollIntoView?.({ block: 'nearest' })
+  }, [cursorId])
+
   return (
-    <div data-testid="grid" role="listbox" tabIndex={0} onKeyDown={onKeyDown}
-      className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3 p-3 outline-none">
-      {cards.map((c) => <Card key={c.id} card={c} selected={c.id === selectedId} onSelect={() => onSelect(c.id)} onOpen={() => onOpen(c.id)} />)}
+    <div ref={inner} data-testid="grid" role="listbox" aria-multiselectable="true" aria-label="Screenshots" tabIndex={0} className="group/grid min-h-full outline-none">
+      {cards.length === 0 ? (
+        <div className="p-8 text-center text-sm text-neutral-500">{emptyText}</div>
+      ) : (
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3 p-3">
+          {cards.map((c) => (
+            <Card key={c.id} card={c} selected={selected.has(c.id)} cursor={c.id === cursorId}
+              onSelect={(e) => onSelect(c.id, e)} onOpen={() => onOpen(c.id)} onMenu={(x, y) => onMenu(c.id, x, y)} />
+          ))}
+        </div>
+      )}
     </div>
   )
-}
+})

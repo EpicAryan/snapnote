@@ -18,6 +18,7 @@ export interface Screenshot {
   hash: string
   label: string
   notes: string
+  tags: string[]
   destination_id: number
   status: Status
   pending_move_to: number | null
@@ -32,6 +33,7 @@ export interface ScreenshotCard {
   captured_at: string
   label: string
   notes: string
+  tags: string[]
   destination_id: number
   destination_name: string
   status: Status
@@ -42,6 +44,8 @@ export interface ListQuery {
   q: string
   destination_id: number | null
   unlabeled_only: boolean
+  /** Exact tag to require. */
+  tag: string | null
   sort: Sort
   limit: number
   offset: number
@@ -51,6 +55,7 @@ export const DEFAULT_QUERY: ListQuery = {
   q: '',
   destination_id: null,
   unlabeled_only: false,
+  tag: null,
   sort: 'newest',
   limit: 200,
   offset: 0,
@@ -84,6 +89,20 @@ export interface ImportReport {
   skipped: number
 }
 
+export interface Skipped {
+  path: string
+  reason: string
+}
+
+/** What became of each file handed to addFiles or pasteClipboard. */
+export interface AddReport {
+  /** Paths now in the library, or in the Screenshots folder on their way in. */
+  added: string[]
+  /** Ids of files that were already tracked. */
+  existing: number[]
+  skipped: Skipped[]
+}
+
 export interface AppError {
   code: 'NotFound' | 'FileMissing' | 'MoveFailed' | 'InvalidInput' | 'Io' | 'Db' | 'Image' | string
   message: string
@@ -97,4 +116,48 @@ export function errorMessage(e: unknown): string {
   if (isAppError(e)) return e.message
   if (e instanceof Error) return e.message
   return String(e)
+}
+
+/** A label used recently, with the destination it was last saved to. */
+export interface RecentLabel {
+  label: string
+  destination_id: number
+  destination_name: string
+  uses: number
+}
+
+export interface DestinationCount { destination_id: number; count: number }
+export interface TagCount { tag: string; count: number }
+
+/** Numbers for the library sidebar. */
+export interface LibraryCounts {
+  total: number
+  unlabeled: number
+  missing: number
+  by_destination: DestinationCount[]
+  tags: TagCount[]
+}
+
+export interface Failed { id: number; reason: string }
+
+export interface DeleteReport {
+  deleted: number[]
+  /** Files that went to the Recycle Bin; the rest were already missing. */
+  trashed: number
+  failed: Failed[]
+  undo_token: number
+}
+
+export interface UndoReport {
+  restored: number[]
+  failed: Failed[]
+}
+
+export interface MoveReport {
+  moved: number
+  unchanged: number
+  /** Metadata saved, file not moved yet (Retry move). */
+  pending: number
+  failed: Failed[]
+  destination: Destination | null
 }

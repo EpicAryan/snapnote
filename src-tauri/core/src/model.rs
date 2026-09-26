@@ -43,6 +43,7 @@ pub struct Screenshot {
     pub hash: String,
     pub label: String,
     pub notes: String,
+    pub tags: Vec<String>,
     pub destination_id: i64,
     pub status: Status,
     pub pending_move_to: Option<i64>,
@@ -59,6 +60,7 @@ pub struct ScreenshotCard {
     pub captured_at: String,
     pub label: String,
     pub notes: String,
+    pub tags: Vec<String>,
     pub destination_id: i64,
     pub destination_name: String,
     pub status: Status,
@@ -90,6 +92,8 @@ pub struct ListQuery {
     pub q: String,
     pub destination_id: Option<i64>,
     pub unlabeled_only: bool,
+    /// Exact tag to require (already normalised).
+    pub tag: Option<String>,
     pub sort: Sort,
     pub limit: i64,
     pub offset: i64,
@@ -101,6 +105,7 @@ impl Default for ListQuery {
             q: String::new(),
             destination_id: None,
             unlabeled_only: false,
+            tag: None,
             sort: Sort::Newest,
             limit: 200,
             offset: 0,
@@ -167,6 +172,37 @@ pub const SETTING_KEYS: &[&str] = &[
 pub struct ImportReport {
     pub added: usize,
     pub skipped: usize,
+}
+
+/// A label used recently, with the destination it was last saved to: one click re-applies both.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecentLabel {
+    pub label: String,
+    pub destination_id: i64,
+    pub destination_name: String,
+    pub uses: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DestinationCount {
+    pub destination_id: i64,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TagCount {
+    pub tag: String,
+    pub count: i64,
+}
+
+/// Numbers for the library sidebar.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct LibraryCounts {
+    pub total: i64,
+    pub unlabeled: i64,
+    pub missing: i64,
+    pub by_destination: Vec<DestinationCount>,
+    pub tags: Vec<TagCount>,
 }
 
 #[cfg(test)]

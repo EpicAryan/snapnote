@@ -122,12 +122,13 @@ pub fn prepare(
     id: i64,
     label: &str,
     notes: &str,
+    tags: &[String],
     choice: &DestinationChoice,
     rename_on_label: bool,
 ) -> Result<PendingSave> {
     store.get_screenshot(id)?; // NotFound early, before creating any Browse destination
     let (dest, _created) = resolve_destination(store, choice)?;
-    store.update_metadata(id, label, notes, dest.id)?;
+    store.update_metadata(id, label, notes, tags, dest.id)?;
     let shot = store.get_screenshot(id)?;
     let plan = plan_for(&shot, &dest, rename_on_label);
     Ok(PendingSave { shot, dest, plan })
@@ -192,11 +193,12 @@ pub fn save_metadata(
     id: i64,
     label: &str,
     notes: &str,
+    tags: &[String],
     choice: &DestinationChoice,
     rename_on_label: bool,
     mover: &Mover,
 ) -> Result<SaveResult> {
-    let pending = prepare(store, id, label, notes, choice, rename_on_label)?;
+    let pending = prepare(store, id, label, notes, tags, choice, rename_on_label)?;
     let outcome = execute(&pending, mover);
     commit(store, &pending, outcome)
 }
@@ -245,7 +247,7 @@ mod tests {
     fn label_only_renames_in_place() {
         let fx = fixture();
         let default = fx.store.default_destination().unwrap();
-        let r = save_metadata(&fx.store, fx.shot_id, "Invoice Timeout", "n", &DestinationChoice::Existing { id: default.id }, true, &*ok_mover()).unwrap();
+        let r = save_metadata(&fx.store, fx.shot_id, "Invoice Timeout", "n", &[], &DestinationChoice::Existing { id: default.id }, true, &*ok_mover()).unwrap();
         assert!(r.renamed && !r.moved && r.warning.is_none());
         assert_eq!(Path::new(&r.path), fx.watch.join("2026-09-26 invoice-timeout.png"));
         assert!(fx.watch.join("2026-09-26 invoice-timeout.png").exists());
@@ -258,7 +260,7 @@ mod tests {
     fn rename_disabled_keeps_filename() {
         let fx = fixture();
         let default = fx.store.default_destination().unwrap();
-        let r = save_metadata(&fx.store, fx.shot_id, "Label", "", &DestinationChoice::Existing { id: default.id }, false, &*ok_mover()).unwrap();
+        let r = save_metadata(&fx.store, fx.shot_id, "Label", "", &[], &DestinationChoice::Existing { id: default.id }, false, &*ok_mover()).unwrap();
         assert!(!r.renamed && !r.moved);
         assert!(fx.watch.join("Screenshot 2026-09-26 015747.png").exists());
     }
@@ -267,7 +269,7 @@ mod tests {
     fn empty_label_keeps_filename_but_saves_notes() {
         let fx = fixture();
         let default = fx.store.default_destination().unwrap();
-        let r = save_metadata(&fx.store, fx.shot_id, "  ", "just notes", &DestinationChoice::Existing { id: default.id }, true, &*ok_mover()).unwrap();
+        let r = save_metadata(&fx.store, fx.shot_id, "  ", "just notes", &[], &DestinationChoice::Existing { id: default.id }, true, &*ok_mover()).unwrap();
         assert!(!r.renamed);
         assert_eq!(fx.store.get_screenshot(fx.shot_id).unwrap().notes, "just notes");
     }
@@ -276,7 +278,7 @@ mod tests {
     fn label_that_slugifies_to_nothing_is_saved_without_rename() {
         let fx = fixture();
         let default = fx.store.default_destination().unwrap();
-        let r = save_metadata(&fx.store, fx.shot_id, "???", "", &DestinationChoice::Existing { id: default.id }, true, &*ok_mover()).unwrap();
+        let r = save_metadata(&fx.store, fx.shot_id, "???", "", &[], &DestinationChoice::Existing { id: default.id }, true, &*ok_mover()).unwrap();
         assert!(!r.renamed && r.warning.is_none());
         assert!(fx.watch.join("Screenshot 2026-09-26 015747.png").exists());
         assert_eq!(fx.store.get_screenshot(fx.shot_id).unwrap().label, "???");
@@ -287,7 +289,7 @@ mod tests {
         let fx = fixture();
         fx.store.set_default_destination_path("Z:\\elsewhere").unwrap();
         let default = fx.store.default_destination().unwrap();
-        let r = save_metadata(&fx.store, fx.shot_id, "stay", "", &DestinationChoice::Existing { id: default.id }, true, &*ok_mover()).unwrap();
+        let r = save_metadata(&fx.store, fx.shot_id, "stay", "", &[], &DestinationChoice::Existing { id: default.id }, true, &*ok_mover()).unwrap();
         assert!(r.renamed && !r.moved);
         assert!(fx.watch.join("2026-09-26 stay.png").exists());
     }
@@ -298,7 +300,7 @@ mod tests {
         let target = fx._dir.path().join("Embee");
         fs::create_dir_all(&target).unwrap();
         let dest = fx.store.create_destination("Embee", &target.to_string_lossy()).unwrap();
-        let r = save_metadata(&fx.store, fx.shot_id, "sync err", "", &DestinationChoice::Existing { id: dest.id }, true, &*ok_mover()).unwrap();
+        let r = save_metadata(&fx.store, fx.shot_id, "sync err", "", &[], &DestinationChoice::Existing { id: dest.id }, true, &*ok_mover()).unwrap();
         assert!(r.moved && r.renamed);
         assert_eq!(r.destination.id, dest.id);
         assert!(target.join("2026-09-26 sync-err.png").exists());
@@ -310,7 +312,7 @@ mod tests {
         let fx = fixture();
         let default = fx.store.default_destination().unwrap();
         fs::write(fx.watch.join("2026-09-26 dup.png"), b"other").unwrap();
-        let r = save_metadata(&fx.store, fx.shot_id, "dup", "", &DestinationChoice::Existing { id: default.id }, true, &*ok_mover()).unwrap();
+        let r = save_metadata(&fx.store, fx.shot_id, "dup", "", &[], &DestinationChoice::Existing { id: default.id }, true, &*ok_mover()).unwrap();
         assert_eq!(Path::new(&r.path), fx.watch.join("2026-09-26 dup-2.png"));
     }
 
@@ -319,7 +321,7 @@ mod tests {
         let fx = fixture();
         let target = fx._dir.path().join("ClientX");
         fs::create_dir_all(&target).unwrap();
-        let r = save_metadata(&fx.store, fx.shot_id, "", "", &DestinationChoice::Browse { path: target.to_string_lossy().into_owned() }, true, &*ok_mover()).unwrap();
+        let r = save_metadata(&fx.store, fx.shot_id, "", "", &[], &DestinationChoice::Browse { path: target.to_string_lossy().into_owned() }, true, &*ok_mover()).unwrap();
         assert!(r.moved);
         assert_eq!(r.destination.name, "ClientX");
         assert_eq!(fx.store.list_destinations().unwrap().len(), 2);
@@ -347,7 +349,7 @@ mod tests {
         fs::create_dir_all(&target).unwrap();
         let dest = fx.store.create_destination("Embee", &target.to_string_lossy()).unwrap();
         let before = fx.store.get_screenshot(fx.shot_id).unwrap().path.clone();
-        let r = save_metadata(&fx.store, fx.shot_id, "x", "y", &DestinationChoice::Existing { id: dest.id }, true, &*failing_mover()).unwrap();
+        let r = save_metadata(&fx.store, fx.shot_id, "x", "y", &[], &DestinationChoice::Existing { id: dest.id }, true, &*failing_mover()).unwrap();
         assert!(!r.moved && !r.renamed);
         assert!(r.warning.as_deref().unwrap().contains("couldn't be moved"));
         let shot = fx.store.get_screenshot(fx.shot_id).unwrap();
@@ -363,7 +365,7 @@ mod tests {
         let target = fx._dir.path().join("Embee");
         fs::create_dir_all(&target).unwrap();
         let dest = fx.store.create_destination("Embee", &target.to_string_lossy()).unwrap();
-        save_metadata(&fx.store, fx.shot_id, "x", "", &DestinationChoice::Existing { id: dest.id }, true, &*failing_mover()).unwrap();
+        save_metadata(&fx.store, fx.shot_id, "x", "", &[], &DestinationChoice::Existing { id: dest.id }, true, &*failing_mover()).unwrap();
         let r = retry_move(&fx.store, fx.shot_id, true, &*ok_mover()).unwrap();
         assert!(r.moved && r.warning.is_none());
         assert_eq!(fx.store.get_screenshot(fx.shot_id).unwrap().pending_move_to, None);
@@ -375,7 +377,7 @@ mod tests {
         let fx = fixture();
         let default = fx.store.default_destination().unwrap();
         fs::remove_file(fx.watch.join("Screenshot 2026-09-26 015747.png")).unwrap();
-        let r = save_metadata(&fx.store, fx.shot_id, "gone", "", &DestinationChoice::Existing { id: default.id }, true, &*ok_mover()).unwrap();
+        let r = save_metadata(&fx.store, fx.shot_id, "gone", "", &[], &DestinationChoice::Existing { id: default.id }, true, &*ok_mover()).unwrap();
         assert!(r.warning.as_deref().unwrap().contains("no longer exists"));
         let shot = fx.store.get_screenshot(fx.shot_id).unwrap();
         assert_eq!(shot.status, crate::Status::Missing);
@@ -387,9 +389,9 @@ mod tests {
         let fx = fixture();
         let default = fx.store.default_destination().unwrap();
         fs::write(fx.watch.join("2026-09-26 dup.png"), b"other").unwrap();
-        let first = save_metadata(&fx.store, fx.shot_id, "dup", "", &DestinationChoice::Existing { id: default.id }, true, &*ok_mover()).unwrap();
+        let first = save_metadata(&fx.store, fx.shot_id, "dup", "", &[], &DestinationChoice::Existing { id: default.id }, true, &*ok_mover()).unwrap();
         assert_eq!(Path::new(&first.path), fx.watch.join("2026-09-26 dup-2.png"));
-        let second = save_metadata(&fx.store, fx.shot_id, "dup", "added notes", &DestinationChoice::Existing { id: default.id }, true, &*ok_mover()).unwrap();
+        let second = save_metadata(&fx.store, fx.shot_id, "dup", "added notes", &[], &DestinationChoice::Existing { id: default.id }, true, &*ok_mover()).unwrap();
         assert!(!second.renamed && !second.moved, "a notes-only edit must not rename");
         assert_eq!(second.path, first.path);
         assert!(fx.watch.join("2026-09-26 dup-2.png").exists());
@@ -402,7 +404,7 @@ mod tests {
         let target = fx._dir.path().join("Embee");
         fs::create_dir_all(&target).unwrap();
         let dest = fx.store.create_destination("Embee", &target.to_string_lossy()).unwrap();
-        let pending = prepare(&fx.store, fx.shot_id, "x", "n", &DestinationChoice::Existing { id: dest.id }, true).unwrap();
+        let pending = prepare(&fx.store, fx.shot_id, "x", "n", &[], &DestinationChoice::Existing { id: dest.id }, true).unwrap();
         assert!(matches!(pending.plan, SavePlan::Move { .. }));
         assert_eq!(fx.store.get_screenshot(fx.shot_id).unwrap().label, "x", "metadata is written in step 1");
         // The store lock could be released here; the disk step needs only the plan.
@@ -415,7 +417,7 @@ mod tests {
         let pending2 = prepare_retry(&fx.store, fx.shot_id, true).unwrap();
         assert!(matches!(pending2.plan, SavePlan::NoChange));
         let missing_target = fx.store.create_destination("Gone", "Z:\\nowhere").unwrap();
-        let pending3 = prepare(&fx.store, fx.shot_id, "x", "n", &DestinationChoice::Existing { id: missing_target.id }, true).unwrap();
+        let pending3 = prepare(&fx.store, fx.shot_id, "x", "n", &[], &DestinationChoice::Existing { id: missing_target.id }, true).unwrap();
         let r3 = commit(&fx.store, &pending3, execute(&pending3, &*failing_mover())).unwrap();
         assert!(r3.warning.as_deref().unwrap().contains("couldn't be moved"));
         assert_eq!(fx.store.get_screenshot(fx.shot_id).unwrap().pending_move_to, Some(missing_target.id));
@@ -426,7 +428,7 @@ mod tests {
         let fx = fixture();
         let default = fx.store.default_destination().unwrap();
         assert!(matches!(
-            save_metadata(&fx.store, 9999, "", "", &DestinationChoice::Existing { id: default.id }, true, &*ok_mover()),
+            save_metadata(&fx.store, 9999, "", "", &[], &DestinationChoice::Existing { id: default.id }, true, &*ok_mover()),
             Err(CoreError::NotFound)
         ));
     }

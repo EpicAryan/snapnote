@@ -1,5 +1,6 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { ask, open as openDialog } from '@tauri-apps/plugin-dialog'
 import type { Commands, Events } from './commands'
 import { DEFAULT_QUERY } from './types'
@@ -7,16 +8,22 @@ import { DEFAULT_QUERY } from './types'
 export const tauriCommands: Commands = {
   listScreenshots: (query) => invoke('list_screenshots', { query: { ...DEFAULT_QUERY, ...query } }),
   getScreenshot: (id) => invoke('get_screenshot', { id }),
-  saveMetadata: (id, label, notes, choice) => invoke('save_metadata', { id, label, notes, choice }),
+  saveMetadata: (id, label, notes, tags, choice) => invoke('save_metadata', { id, label, notes, tags, choice }),
   retryMove: (id) => invoke('retry_move', { id }),
   thumbnailUrl: async (id) => convertFileSrc(await invoke<string>('get_thumbnail', { id })),
   imageDataUrl: (id) => invoke('get_image_data_url', { id }),
   openFile: (id) => invoke('open_file', { id }),
   revealFile: (id) => invoke('reveal_file', { id }),
   removeFromLibrary: (id) => invoke('remove_from_library', { id }),
-  deleteFile: (id) => invoke('delete_file', { id }),
-  copyImage: (id) => invoke('copy_image', { id }),
-  pasteClipboardImage: () => invoke('paste_clipboard_image'),
+  deleteScreenshots: (ids) => invoke('delete_screenshots', { ids }),
+  undoDelete: (token) => invoke('undo_delete', { token }),
+  copyScreenshots: (ids) => invoke('copy_screenshots', { ids }),
+  moveScreenshots: (ids, choice) => invoke('move_screenshots', { ids, choice }),
+  addTags: (ids, tags) => invoke('add_tags', { ids, tags }),
+  recentLabels: () => invoke('recent_labels'),
+  libraryCounts: () => invoke('library_counts'),
+  pasteClipboard: () => invoke('paste_clipboard'),
+  addFiles: (paths) => invoke('add_files', { paths }),
   reconcileNow: () => invoke('reconcile_now'),
   confirm: (message, title) => ask(message, { title: title ?? 'snapnote', kind: 'warning' }),
 
@@ -45,6 +52,20 @@ export const tauriCommands: Commands = {
   hidePopup: () => invoke('hide_popup'),
   labelLastScreenshot: () => invoke('label_last_screenshot'),
 
-  on: <E extends keyof Events>(event: E, handler: (payload: Events[E]) => void) =>
-    listen<Events[E]>(event, (e) => handler(e.payload)),
+  on: <E extends keyof Events>(event: E, handler: (payload: Events[E]) => void) => {
+    // Explorer drag-and-drop arrives through the webview, not as a named event.
+    if (event === 'files:drag' || event === 'files:drop') {
+      const h = handler as (payload: Events['files:drag'] | Events['files:drop']) => void
+      return getCurrentWebview().onDragDropEvent((e) => {
+        const p = e.payload
+        if (event === 'files:drag') {
+          if (p.type === 'enter') h({ active: true })
+          else if (p.type === 'leave' || p.type === 'drop') h({ active: false })
+        } else if (p.type === 'drop') {
+          h({ paths: p.paths })
+        }
+      })
+    }
+    return listen<Events[E]>(event, (e) => handler(e.payload))
+  },
 }

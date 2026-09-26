@@ -1,10 +1,10 @@
 use super::paths;
 use super::Store;
-use crate::{CoreError, NewScreenshot, Result, Screenshot, Status};
+use crate::{tags, CoreError, NewScreenshot, Result, Screenshot, Status};
 use rusqlite::{params, OptionalExtension, Row};
 use std::collections::HashSet;
 
-pub(crate) const SHOT_COLS: &str = "id, path, original_name, captured_at, size_bytes, hash, label, notes, destination_id, status, pending_move_to, created_at, updated_at";
+pub(crate) const SHOT_COLS: &str = "id, path, original_name, captured_at, size_bytes, hash, label, notes, destination_id, status, pending_move_to, created_at, updated_at, tags";
 
 pub(crate) fn row_to_screenshot(r: &Row) -> rusqlite::Result<Screenshot> {
     Ok(Screenshot {
@@ -21,6 +21,7 @@ pub(crate) fn row_to_screenshot(r: &Row) -> rusqlite::Result<Screenshot> {
         pending_move_to: r.get(10)?,
         created_at: r.get(11)?,
         updated_at: r.get(12)?,
+        tags: tags::split_stored(&r.get::<_, String>(13)?),
     })
 }
 
@@ -58,15 +59,66 @@ impl Store {
             .optional()?)
     }
 
-    pub fn update_metadata(&self, id: i64, label: &str, notes: &str, destination_id: i64) -> Result<()> {
+    pub fn update_metadata(&self, id: i64, label: &str, notes: &str, tag_list: &[String], destination_id: i64) -> Result<()> {
         self.get_destination(destination_id)?;
+        let stored = tags::join_tags(&tags::normalize_tags(tag_list));
         let n = self.conn.execute(
-            "UPDATE screenshots SET label = ?1, notes = ?2, destination_id = ?3, updated_at = datetime('now') WHERE id = ?4",
-            params![label.trim(), notes.trim(), destination_id, id],
+            "UPDATE screenshots SET label = ?1, notes = ?2, tags = ?3, destination_id = ?4, updated_at = datetime('now') WHERE id = ?5",
+            params![label.trim(), notes.trim(), stored, destination_id, id],
         )?;
         if n == 0 {
             return Err(CoreError::NotFound);
         }
+        Ok(())
+    }
+
+    /// Adds `new_tags` to each row, keeping what is already there. Returns how many rows changed.
+    pub fn add_tags(&self, ids: &[i64], new_tags: &[String]) -> Result<usize> {
+        let extra = tags::normalize_tags(new_tags);
+        let tx = self.conn.unchecked_transaction()?;
+        let mut changed = 0;
+        for id in ids {
+            let shot = self.get_screenshot(*id)?;
+            let mut merged = shot.tags.clone();
+            for t in &extra {
+                if !merged.contains(t) {
+                    merged.push(t.clone());
+                }
+            }
+            if merged != shot.tags {
+                self.conn.execute(
+                    "UPDATE screenshots SET tags = ?1, updated_at = datetime('now') WHERE id = ?2",
+                    params![tags::join_tags(&merged), id],
+                )?;
+                changed += 1;
+            }
+        }
+        tx.commit()?;
+        Ok(changed)
+    }
+
+    /// Puts a deleted row back with its original id and metadata (undo). Fails if the id or
+    /// path is taken again.
+    pub fn restore_screenshot(&self, shot: &Screenshot, status: Status) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO screenshots(id, path, original_name, captured_at, size_bytes, hash, label, notes, tags, destination_id, status, pending_move_to, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, datetime('now'))",
+            params![
+                shot.id,
+                shot.path,
+                shot.original_name,
+                shot.captured_at,
+                shot.size_bytes,
+                shot.hash,
+                shot.label,
+                shot.notes,
+                tags::join_tags(&shot.tags),
+                shot.destination_id,
+                status.as_str(),
+                shot.pending_move_to,
+                shot.created_at,
+            ],
+        )?;
         Ok(())
     }
 
@@ -182,7 +234,7 @@ pub(crate) mod tests {
         let dest = s.create_destination("Embee", "D:\\Embee").unwrap();
         let shot = s.insert_screenshot(&new_shot(&s, "a.png", "2026-09-26T01:00:00")).unwrap();
 
-        s.update_metadata(shot.id, "Invoice", "notes here", dest.id).unwrap();
+        s.update_metadata(shot.id, "Invoice", "notes here", &[], dest.id).unwrap();
         let got = s.get_screenshot(shot.id).unwrap();
         assert_eq!((got.label.as_str(), got.notes.as_str(), got.destination_id), ("Invoice", "notes here", dest.id));
         assert!(got.updated_at >= shot.updated_at);
@@ -207,7 +259,7 @@ pub(crate) mod tests {
     fn update_metadata_with_unknown_destination_fails() {
         let s = Store::open_in_memory(WATCH).unwrap();
         let shot = s.insert_screenshot(&new_shot(&s, "a.png", "2026-09-26T01:00:00")).unwrap();
-        assert!(s.update_metadata(shot.id, "x", "", 4242).is_err());
+        assert!(s.update_metadata(shot.id, "x", "", &[], 4242).is_err());
     }
 
     #[test]
@@ -221,5 +273,45 @@ pub(crate) mod tests {
         let inside = s.tracked_paths_in(WATCH).unwrap();
         assert_eq!(inside.len(), 1);
         assert!(inside.contains(&crate::store::paths::norm(&format!("{WATCH}\\a.png"))));
+    }
+}
+
+#[cfg(test)]
+mod tag_and_restore_tests {
+    use super::tests::{new_shot, WATCH};
+    use crate::store::Store;
+    use crate::{CoreError, Status};
+
+    #[test]
+    fn tags_round_trip_normalised_and_add_tags_merges() {
+        let s = Store::open_in_memory(WATCH).unwrap();
+        let d = s.default_destination().unwrap().id;
+        let a = s.insert_screenshot(&new_shot(&s, "a.png", "2026-09-26T01:00:00")).unwrap();
+        let b = s.insert_screenshot(&new_shot(&s, "b.png", "2026-09-25T01:00:00")).unwrap();
+        assert!(a.tags.is_empty());
+        s.update_metadata(a.id, "Invoice", "", &["Client X".into(), "invoice".into(), "client-x".into()], d).unwrap();
+        assert_eq!(s.get_screenshot(a.id).unwrap().tags, vec!["client-x", "invoice"]);
+        assert_eq!(s.add_tags(&[a.id, b.id], &["Urgent".into(), "invoice".into()]).unwrap(), 2);
+        assert_eq!(s.get_screenshot(a.id).unwrap().tags, vec!["client-x", "invoice", "urgent"]);
+        assert_eq!(s.get_screenshot(b.id).unwrap().tags, vec!["urgent", "invoice"]);
+        assert!(matches!(s.add_tags(&[999], &["x".into()]), Err(CoreError::NotFound)));
+    }
+
+    #[test]
+    fn restore_screenshot_reinserts_the_same_row() {
+        let s = Store::open_in_memory(WATCH).unwrap();
+        let d = s.default_destination().unwrap().id;
+        let a = s.insert_screenshot(&new_shot(&s, "a.png", "2026-09-26T01:00:00")).unwrap();
+        s.update_metadata(a.id, "Keep me", "notes", &["t1".into()], d).unwrap();
+        let before = s.get_screenshot(a.id).unwrap();
+        s.delete_screenshot(a.id).unwrap();
+        assert!(matches!(s.get_screenshot(a.id), Err(CoreError::NotFound)));
+
+        s.restore_screenshot(&before, Status::Missing).unwrap();
+        let after = s.get_screenshot(a.id).unwrap();
+        assert_eq!(after.id, before.id);
+        assert_eq!((after.label.as_str(), after.notes.as_str(), &after.tags), ("Keep me", "notes", &before.tags));
+        assert_eq!(after.status, Status::Missing);
+        assert!(s.restore_screenshot(&before, Status::Present).is_err(), "cannot restore twice");
     }
 }
