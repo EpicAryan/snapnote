@@ -5,7 +5,6 @@ use base64::Engine;
 use snapnote_core::{files, save, thumbs, CoreError, DestinationChoice, ListQuery, SaveResult, Screenshot, ScreenshotCard, Status};
 use std::path::Path;
 use tauri::{AppHandle, Emitter, State};
-use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_opener::OpenerExt;
 
 #[tauri::command(async)]
@@ -114,12 +113,13 @@ pub fn reveal_file(app: AppHandle, state: State<'_, AppState>, id: i64) -> CmdRe
     app.opener().reveal_item_in_dir(&path).map_err(|e| AppError::new("Io", e.to_string()))
 }
 
-/// Puts the screenshot's pixels on the clipboard so it can be pasted into any app.
+/// Copies the screenshot as a file (Explorer paste) and as an image (editors, chat apps) at once.
 #[tauri::command(async)]
-pub fn copy_image(app: AppHandle, state: State<'_, AppState>, id: i64) -> CmdResult<()> {
+pub fn copy_screenshot(app: AppHandle, state: State<'_, AppState>, id: i64) -> CmdResult<()> {
     let path = existing_path(&app, &state, id)?;
-    let img = tauri::image::Image::from_path(&path)?;
-    app.clipboard().write_image(&img).map_err(|e| AppError::new("Io", format!("Could not copy to the clipboard: {e}")))
+    let png = std::fs::read(&path)?;
+    let bmp = snapnote_core::export::bmp_bytes(Path::new(&path))?;
+    crate::clipboard::write_image_file(Path::new(&path), &png, &bmp).map_err(|e| AppError::new("Io", format!("Could not copy to the clipboard: {e}")))
 }
 
 #[tauri::command(async)]

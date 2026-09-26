@@ -13,6 +13,7 @@ export const SearchBar = forwardRef<HTMLInputElement, Props>(function SearchBar(
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-neutral-800 p-3">
       <input ref={ref} type="search" role="searchbox" placeholder="Search labels and notes…  ( / )" value={p.q} onChange={(e) => p.onQ(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); if (p.q) p.onQ(''); else e.currentTarget.blur() } }}
         className="min-w-64 flex-1 rounded border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-sm" />
       <select aria-label="Destination filter" value={p.destination ?? ''} onChange={(e) => p.onDestination(e.target.value ? Number(e.target.value) : null)}
         className="rounded border border-neutral-700 bg-neutral-800 px-2 py-1.5 text-sm">

@@ -8,7 +8,18 @@ import { errorMessage } from '../../lib/types'
 import { forgetThumbnail } from '../../lib/useThumbnail'
 import { describeResult } from '../popup/Popup'
 
-export function SidePanel({ id, onChanged, onClose }: { id: number | null; onChanged(): void; onClose?(): void }) {
+interface Props {
+  id: number | null
+  onChanged(): void
+  onClose?(): void
+  /** Delete and Copy go through the library, so the confirmation and feedback are the same everywhere. */
+  onDelete(): void
+  onCopy(): void
+  /** Bumped by the library when the user asks to edit (F2, menu): the label input takes focus. */
+  editRequest?: number
+}
+
+export function SidePanel({ id, onChanged, onClose, onDelete, onCopy, editRequest = 0 }: Props) {
   const cmd = useCommands()
   const [shot, setShot] = useState<Screenshot | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
@@ -17,6 +28,8 @@ export function SidePanel({ id, onChanged, onClose }: { id: number | null; onCha
   const [notes, setNotes] = useState('')
   const [choice, setChoice] = useState<DestinationChoice>({ kind: 'existing', id: 0 })
   const [msg, setMsg] = useState<{ text: string; tone: 'ok' | 'warn' | 'err' } | null>(null)
+  const labelRef = useRef<HTMLInputElement>(null)
+  const handledEdit = useRef(0)
   // Responses for an earlier selection can arrive after a later one (previews are whole
   // PNGs); every load gets a token and late results are dropped.
   const loadSeq = useRef(0)
@@ -41,8 +54,17 @@ export function SidePanel({ id, onChanged, onClose }: { id: number | null; onCha
 
   useEffect(() => { setMsg(null); if (id == null) { loadSeq.current++; setShot(null); return } void load(id) }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (id == null || !shot) return <div className="p-4 text-sm text-neutral-500">Select a screenshot to see details.</div>
+  useEffect(() => {
+    if (!shot || editRequest === 0 || editRequest === handledEdit.current) return
+    handledEdit.current = editRequest
+    labelRef.current?.focus()
+    labelRef.current?.select()
+  }, [editRequest, shot])
 
+  if (id == null) return null
+  if (!shot) return <div className="p-4 text-sm text-neutral-500">Loading…</div>
+
+  const present = shot.status === 'present'
   const btn = 'rounded bg-neutral-800 px-2 py-1 text-xs hover:bg-neutral-700'
   const after = async (p: Promise<SaveResult>) => {
     try {
@@ -62,11 +84,11 @@ export function SidePanel({ id, onChanged, onClose }: { id: number | null; onCha
       </div>
       <div className="relative overflow-hidden rounded bg-neutral-900">
         {preview ? <img src={preview} alt="Screenshot preview" className="w-full object-contain" /> : <div className="aspect-video" />}
-        {shot.status === 'missing' && <span className="absolute right-2 top-2 rounded bg-red-700 px-1.5 text-xs">Missing</span>}
+        {!present && <span className="absolute right-2 top-2 rounded bg-red-700 px-1.5 text-xs">Missing</span>}
       </div>
 
       <label className="text-xs text-neutral-400" htmlFor="sp-label">Label</label>
-      <input id="sp-label" value={label} maxLength={120} onChange={(e) => setLabel(e.target.value)} className="rounded border border-neutral-700 bg-neutral-800 px-2 py-1" />
+      <input ref={labelRef} id="sp-label" value={label} maxLength={120} onChange={(e) => setLabel(e.target.value)} className="rounded border border-neutral-700 bg-neutral-800 px-2 py-1" />
       <label className="text-xs text-neutral-400" htmlFor="sp-notes">Notes</label>
       <textarea id="sp-notes" rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} className="rounded border border-neutral-700 bg-neutral-800 px-2 py-1" />
       <label className="text-xs text-neutral-400" htmlFor="sp-dest">Destination</label>
@@ -81,12 +103,12 @@ export function SidePanel({ id, onChanged, onClose }: { id: number | null; onCha
       </dl>
 
       <div className="flex flex-wrap gap-2">
-        {shot.status === 'present' && <button className={btn} onClick={() => void cmd.openFile(shot.id)}>Open</button>}
-        {shot.status === 'present' && <button className={btn} onClick={() => void cmd.revealFile(shot.id)}>Reveal in Explorer</button>}
-        {shot.status === 'present' && <button className={btn} onClick={() => void cmd.copyImage(shot.id).then(() => setMsg({ text: 'Copied image to the clipboard', tone: 'ok' }), (e) => setMsg({ text: errorMessage(e), tone: 'err' }))}>Copy image</button>}
+        {present && <button className={btn} onClick={() => void cmd.openFile(shot.id)}>Open</button>}
+        {present && <button className={btn} onClick={() => void cmd.revealFile(shot.id)}>Show in folder</button>}
+        {present && <button className={btn} onClick={onCopy}>Copy</button>}
         {shot.pending_move_to != null && <button className={`${btn} bg-amber-800`} onClick={() => void after(cmd.retryMove(shot.id))}>Retry move</button>}
-        <ConfirmButton className={btn} label="Remove from library" confirmLabel="Confirm remove" onConfirm={() => { void cmd.removeFromLibrary(shot.id).then(() => { setShot(null); onChanged() }) }} />
-        {shot.status === 'present' && <ConfirmButton className={btn} label="Delete file" confirmLabel="Confirm delete" onConfirm={() => { void cmd.deleteFile(shot.id).then(() => { setShot(null); onChanged() }) }} />}
+        {present && <ConfirmButton className={btn} label="Remove from library" confirmLabel="Confirm remove" onConfirm={() => { void cmd.removeFromLibrary(shot.id).then(() => { setShot(null); onChanged() }) }} />}
+        <button className={`${btn} text-red-300`} onClick={onDelete}>{present ? 'Delete' : 'Remove from library'}</button>
       </div>
     </div>
   )

@@ -1,4 +1,5 @@
 mod autostart;
+mod clipboard;
 mod commands;
 mod error;
 mod hotkey;
@@ -38,6 +39,10 @@ pub fn run() {
             tauri::WindowEvent::Focused(true) if window.label() == windows::LIBRARY => {
                 reconcile::spawn(window.app_handle());
             }
+            // The normal geometry is only readable while not maximized, so it is noted as it changes.
+            tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_) if window.label() == windows::LIBRARY => {
+                windows::note_library_bounds(window);
+            }
             _ => {}
         })
         .setup(|app| {
@@ -71,6 +76,7 @@ pub fn run() {
                 toast_id: Mutex::new(None),
                 watcher: Mutex::new(None),
                 hotkey_error: Mutex::new(None),
+                library_placement: Mutex::new(Default::default()),
             });
 
             windows::restore_library_bounds(app.handle());
@@ -115,8 +121,9 @@ pub fn run() {
             commands::screenshots::delete_file,
             commands::system::import_existing,
             commands::system::clear_thumbnail_cache,
-            commands::screenshots::copy_image,
-            commands::system::paste_clipboard_image,
+            commands::screenshots::copy_screenshot,
+            commands::system::paste_clipboard,
+            commands::system::add_files,
             commands::system::reconcile_now,
         ])
         .build(tauri::generate_context!())

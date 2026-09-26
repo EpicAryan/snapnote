@@ -84,6 +84,20 @@ export interface ImportReport {
   skipped: number
 }
 
+export interface Skipped {
+  path: string
+  reason: string
+}
+
+/** What became of each file handed to addFiles or pasteClipboard. */
+export interface AddReport {
+  /** Paths now in the library, or in the Screenshots folder on their way in. */
+  added: string[]
+  /** Ids of files that were already tracked. */
+  existing: number[]
+  skipped: Skipped[]
+}
+
 export interface AppError {
   code: 'NotFound' | 'FileMissing' | 'MoveFailed' | 'InvalidInput' | 'Io' | 'Db' | 'Image' | string
   message: string

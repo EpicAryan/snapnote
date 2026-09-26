@@ -1,5 +1,5 @@
 import type { Commands, Events, Unlisten } from './commands'
-import type { AppError, Destination, DestinationChoice, ListQuery, SaveResult, Screenshot, ScreenshotCard, Settings } from './types'
+import type { AddReport, AppError, Destination, DestinationChoice, ListQuery, SaveResult, Screenshot, ScreenshotCard, Settings } from './types'
 import { DEFAULT_QUERY } from './types'
 
 const WATCH = 'C:\\Users\\me\\OneDrive\\Pictures\\Screenshots'
@@ -25,7 +25,8 @@ export interface MockHandle {
   state: { screenshots: Screenshot[]; destinations: Destination[]; settings: Settings; folders: Set<string> }
   setPickFolderResult(v: string | null): void
   setConfirmResult(v: boolean): void
-  setClipboardHasImage(v: boolean): void
+  /** What the next paste finds: files (Explorer copy) win over an image. Defaults to an image. */
+  setClipboard(v: { image?: boolean; files?: string[] }): void
 }
 
 export interface MockSeed {
@@ -76,8 +77,7 @@ export function createMockCommands(seed: MockSeed = {}): MockHandle {
   let nextDest = 2
   let pickFolderResult: string | null = 'D:\\ClientX'
   let confirmResult = true
-  let clipboardHasImage = true
-  void nextId
+  let clipboard: { image: boolean; files: string[] } = { image: true, files: [] }
 
   const emit: MockHandle['emit'] = (event, payload) => {
     listeners.get(event)?.forEach((h) => h(payload))
@@ -126,6 +126,26 @@ export function createMockCommands(seed: MockSeed = {}): MockHandle {
     let name = base
     for (let n = 2; destinations.some((d) => d.name.toLowerCase() === name.toLowerCase()); n++) name = `${base}-${n}`
     return createDestination(name, choice.path)
+  }
+  const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p
+  const addRow = (path: string): Screenshot => {
+    const s: Screenshot = { ...baseShots[0], id: nextId++, path, original_name: baseName(path), captured_at: '2026-09-26T12:00:00', label: '', notes: '', destination_id: 1, status: 'present', pending_move_to: null }
+    screenshots.push(s)
+    emit('screenshot:new', { id: s.id })
+    return s
+  }
+  // Mirrors add::plan_add: tracked -> existing; non-image -> skipped; else it lands in the Screenshots folder as a PNG.
+  const addPaths = (paths: string[]): AddReport => {
+    const report: AddReport = { added: [], existing: [], skipped: [] }
+    for (const p of paths) {
+      const tracked = screenshots.find((s) => norm(s.path) === norm(p))
+      if (tracked) { report.existing.push(tracked.id); continue }
+      if (!/\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(p)) { report.skipped.push({ path: baseName(p), reason: 'not an image' }); continue }
+      const inWatch = norm(p).startsWith(norm(WATCH) + '\\')
+      const target = inWatch ? p : `${WATCH}\\${baseName(p).replace(/\.[^.]+$/, '')}.png`
+      report.added.push(addRow(target).path)
+    }
+    return report
   }
   const applyMove = (s: Screenshot, dest: Destination): SaveResult => {
     if (s.status === 'missing') {
@@ -196,14 +216,20 @@ export function createMockCommands(seed: MockSeed = {}): MockHandle {
       calls.push(['deleteFile', id])
       await commands.removeFromLibrary(id)
     },
-    async copyImage(id) {
+    async copyScreenshot(id) {
       find(id)
-      calls.push(['copyImage', id])
+      calls.push(['copyScreenshot', id])
     },
-    async pasteClipboardImage() {
-      calls.push(['pasteClipboardImage'])
-      if (!clipboardHasImage) throw err('InvalidInput', 'No image on the clipboard')
-      return `${WATCH}\\Screenshot 2026-09-26 120000.png`
+    async pasteClipboard() {
+      calls.push(['pasteClipboard'])
+      if (clipboard.files.length) return addPaths(clipboard.files)
+      if (!clipboard.image) throw err('InvalidInput', 'Nothing to paste. Copy an image or image files first.')
+      const path = addRow(`${WATCH}\\Screenshot 2026-09-26 120000.png`).path
+      return { added: [path], existing: [], skipped: [] }
+    },
+    async addFiles(paths) {
+      calls.push(['addFiles', paths])
+      return addPaths(paths)
     },
     async reconcileNow() {
       calls.push(['reconcileNow'])
@@ -288,6 +314,6 @@ export function createMockCommands(seed: MockSeed = {}): MockHandle {
     state: { screenshots, destinations, settings, folders },
     setPickFolderResult(v) { pickFolderResult = v },
     setConfirmResult(v) { confirmResult = v },
-    setClipboardHasImage(v) { clipboardHasImage = v },
+    setClipboard(v) { clipboard = { image: v.image ?? false, files: v.files ?? [] } },
   }
 }

@@ -1,5 +1,5 @@
 import type {
-  Destination, DestinationChoice, ImportReport, ListQuery, SaveResult, Screenshot,
+  AddReport, Destination, DestinationChoice, ImportReport, ListQuery, SaveResult, Screenshot,
   ScreenshotCard, SettingKey, Settings,
 } from './types'
 
@@ -15,6 +15,10 @@ export interface Events {
   'hotkey:error': { message: string }
   'library:view': { view: 'grid' | 'settings' }
   'library:refresh': Record<string, never>
+  /** Files are being dragged over the window (true), or the drag left or ended (false). */
+  'files:drag': { active: boolean }
+  /** Files were dropped on the window. */
+  'files:drop': { paths: string[] }
 }
 
 export type Unlisten = () => void
@@ -30,10 +34,12 @@ export interface Commands {
   revealFile(id: number): Promise<void>
   removeFromLibrary(id: number): Promise<void>
   deleteFile(id: number): Promise<void>
-  /** Puts the screenshot's pixels on the clipboard. */
-  copyImage(id: number): Promise<void>
-  /** Saves the clipboard image into the watch folder as a new screenshot; resolves to its path. */
-  pasteClipboardImage(): Promise<string>
+  /** Puts the file and its pixels on the clipboard, so Explorer and image editors can both paste it. */
+  copyScreenshot(id: number): Promise<void>
+  /** Adds files from the clipboard, or saves a clipboard image into the Screenshots folder. */
+  pasteClipboard(): Promise<AddReport>
+  /** Adds image files (for example dropped from Explorer) to the library. */
+  addFiles(paths: string[]): Promise<AddReport>
   /** Re-checks every tracked file on disk; resolves to how many rows changed status. */
   reconcileNow(): Promise<number>
   /** Native yes/no dialog. */
