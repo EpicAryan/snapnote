@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useCommands } from '../../lib/CommandsContext'
 import type { Destination } from '../../lib/types'
+import { FirstRunNotice } from './FirstRunNotice'
 import { Grid } from './Grid'
 import { SearchBar } from './SearchBar'
 import { useLibraryQuery } from './useLibraryQuery'
@@ -41,6 +42,7 @@ export function Library({ sidePanel, settings }: { sidePanel?: (id: number | nul
           <button className={`rounded px-2 py-1 ${view === 'settings' ? 'bg-neutral-800' : ''}`} onClick={() => setView('settings')}>Settings</button>
         </nav>
       </header>
+      <FirstRunNotice />
       {view === 'settings' ? (
         <div className="flex-1 overflow-auto">{settings}</div>
       ) : (
