@@ -35,7 +35,7 @@ export const Grid = forwardRef<HTMLDivElement, Props>(function Grid({ cards, sel
   }, [cursorId])
 
   return (
-    <div ref={inner} data-testid="grid" role="listbox" aria-multiselectable="true" aria-label="Screenshots" tabIndex={0} className="group/grid min-h-full outline-none">
+    <div ref={inner} data-testid="grid" role="listbox" aria-multiselectable="true" aria-label="Screenshots" tabIndex={0} className="group/grid flex-1 outline-none">
       {cards.length === 0 ? (
         <div className="p-8 text-center text-sm text-neutral-500">{emptyText}</div>
       ) : (
