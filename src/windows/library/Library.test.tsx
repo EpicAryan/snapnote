@@ -23,7 +23,7 @@ describe('Library', () => {
     const first = screen.getAllByTestId('card')[0]
     expect(within(first).getByText('Embee')).toBeInTheDocument()
     expect(within(first).getByText('26 Sep 2026')).toBeInTheDocument()
-    expect(within(first).getByRole('img')).toHaveAttribute('src', 'mock://thumb/1')
+    expect(await within(first).findByRole('img')).toHaveAttribute('src', 'mock://thumb/1')
   })
 
   it('search narrows results after the debounce', async () => {
