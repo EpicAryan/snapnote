@@ -2,13 +2,14 @@ use super::Store;
 use crate::{ListQuery, Result, ScreenshotCard, Sort, Status};
 use rusqlite::{params_from_iter, types::Value};
 
-/// Each whitespace token becomes a quoted prefix term; punctuation is stripped so user
-/// input can never be parsed as FTS5 syntax. Terms are implicitly AND-ed by FTS5.
+/// Every run of alphanumerics becomes a quoted prefix term, so `invoice-timeout` matches the
+/// two tokens unicode61 stores for that label, and user input can never be parsed as FTS5
+/// syntax. Terms are implicitly AND-ed by FTS5.
 pub fn fts_query(q: &str) -> Option<String> {
     let terms: Vec<String> = q
-        .split_whitespace()
-        .map(|t| t.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>())
+        .split(|c: char| !c.is_alphanumeric())
         .filter(|t| !t.is_empty())
+        .map(|t| t.chars().flat_map(char::to_lowercase).collect::<String>())
         .map(|t| format!("\"{t}\"*"))
         .collect();
     if terms.is_empty() {
@@ -73,7 +74,8 @@ mod tests {
     fn fts_query_builds_quoted_prefix_terms() {
         assert_eq!(fts_query("inv time"), Some("\"inv\"* \"time\"*".to_string()));
         assert_eq!(fts_query("  "), None);
-        assert_eq!(fts_query("a:b OR \"x\""), Some("\"ab\"* \"or\"* \"x\"*".to_string()), "punctuation and FTS keywords are neutralised");
+        assert_eq!(fts_query("a:b OR \"x\""), Some("\"a\"* \"b\"* \"or\"* \"x\"*".to_string()), "punctuation splits terms and FTS keywords are neutralised");
+        assert_eq!(fts_query("invoice-timeout"), Some("\"invoice\"* \"timeout\"*".to_string()), "hyphenated input matches how unicode61 tokenises labels");
         assert_eq!(fts_query("Ünï"), Some("\"ünï\"*".to_string()));
     }
 
@@ -90,6 +92,16 @@ mod tests {
 
     fn names(cards: &[crate::ScreenshotCard]) -> Vec<&str> {
         cards.iter().map(|c| c.original_name.as_str()).collect()
+    }
+
+    #[test]
+    fn hyphenated_query_finds_hyphenated_label() {
+        let s = Store::open_in_memory(WATCH).unwrap();
+        let a = s.insert_screenshot(&new_shot(&s, "a.png", "2026-09-26T01:00:00")).unwrap();
+        s.update_metadata(a.id, "api-timeout", "", s.default_destination().unwrap().id).unwrap();
+        let q = |t: &str| ListQuery { q: t.into(), ..Default::default() };
+        assert_eq!(names(&s.list_screenshots(&q("api-timeout")).unwrap()), ["a.png"]);
+        assert_eq!(names(&s.list_screenshots(&q("api")).unwrap()), ["a.png"]);
     }
 
     #[test]

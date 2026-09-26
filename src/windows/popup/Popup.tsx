@@ -29,14 +29,22 @@ export function Popup() {
   const [choice, setChoice] = useState<DestinationChoice>({ kind: 'existing', id: 0 })
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' })
   const labelRef = useRef<HTMLInputElement>(null)
+  // Id of the screenshot whose fields are being edited, or null. A second popup:open for the
+  // same id (hotkey pressed again) must not throw away what the user typed.
+  const editingId = useRef<number | null>(null)
 
   const reset = () => {
+    editingId.current = null
     setShot(null); setThumb(null); setLabel(''); setNotes(''); setPhase({ kind: 'idle' })
   }
 
   useEffect(() => {
     let un: (() => void) | undefined
     cmd.on('popup:open', async ({ id }) => {
+      if (editingId.current === id) {
+        labelRef.current?.focus()
+        return
+      }
       try {
         const [s, dests] = await Promise.all([cmd.getScreenshot(id), cmd.listDestinations()])
         let t: string | null = null
@@ -45,6 +53,7 @@ export function Popup() {
         setLabel(s.label); setNotes(s.notes)
         setChoice({ kind: 'existing', id: s.destination_id })
         setPhase({ kind: 'editing' })
+        editingId.current = s.id
         setTimeout(() => labelRef.current?.focus(), 0)
       } catch {
         reset()
@@ -66,6 +75,7 @@ export function Popup() {
       }
     }
     setPhase({ kind: 'saving' })
+    editingId.current = null
     try {
       const r = await cmd.saveMetadata(shot.id, label, notes, choice)
       const text = r.warning ?? describeResult(r)

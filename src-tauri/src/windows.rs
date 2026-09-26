@@ -90,14 +90,26 @@ pub fn show_settings(app: &AppHandle) {
 
 /// Hotkey and tray action: the toasted screenshot if one is showing, else the newest, else the library.
 pub fn label_current_or_newest(app: &AppHandle) {
-    let state = app.state::<AppState>();
-    let toast = state.toast_id.lock().ok().and_then(|t| *t);
-    let newest = || state.store().ok().and_then(|s| s.newest_screenshot().ok().flatten()).map(|s| s.id);
-    let chosen = toast.or_else(newest);
-    match chosen {
-        Some(id) => show_popup(app, id),
-        None => show_library(app),
+    // A popup that is already open holds unsaved typing: just bring it to the front.
+    if let Some(w) = win(app, POPUP) {
+        if w.is_visible().unwrap_or(false) {
+            let _ = w.set_focus();
+            return;
+        }
     }
+    // The hotkey and tray handlers run on the main thread, and the store lock may be held by
+    // a long command (an import, a move with retries), so the lookup runs on its own thread.
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let state = app.state::<AppState>();
+        let toast = state.toast_id.lock().ok().and_then(|t| *t);
+        let newest = || state.store().ok().and_then(|s| s.newest_screenshot().ok().flatten()).map(|s| s.id);
+        let chosen = toast.or_else(newest);
+        match chosen {
+            Some(id) => show_popup(&app, id),
+            None => show_library(&app),
+        }
+    });
 }
 
 // ---- library window bounds ----
@@ -124,7 +136,8 @@ pub fn save_library_bounds(app: &AppHandle) {
     let b = Bounds { x: pos.x, y: pos.y, w: size.width, h: size.height };
     let Ok(json) = serde_json::to_string(&b) else { return };
     let state = app.state::<AppState>();
-    let store = state.store();
+    // Runs on the main thread from the close handler: never wait on a busy store.
+    let store = state.store.try_lock();
     if let Ok(store) = store {
         let _ = store.set_setting("library_window_bounds", &json);
     }

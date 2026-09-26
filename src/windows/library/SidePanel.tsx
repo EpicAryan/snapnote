@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ConfirmButton } from '../../components/ConfirmButton'
 import { DestinationSelect } from '../../components/DestinationSelect'
 import { useCommands } from '../../lib/CommandsContext'
@@ -17,16 +17,29 @@ export function SidePanel({ id, onChanged }: { id: number | null; onChanged(): v
   const [notes, setNotes] = useState('')
   const [choice, setChoice] = useState<DestinationChoice>({ kind: 'existing', id: 0 })
   const [msg, setMsg] = useState<{ text: string; tone: 'ok' | 'warn' | 'err' } | null>(null)
+  // Responses for an earlier selection can arrive after a later one (previews are whole
+  // PNGs); every load gets a token and late results are dropped.
+  const loadSeq = useRef(0)
 
   const load = async (sid: number) => {
+    const mine = ++loadSeq.current
+    const current = () => mine === loadSeq.current
     try {
       const [s, d] = await Promise.all([cmd.getScreenshot(sid), cmd.listDestinations()])
+      if (!current()) return
       setShot(s); setDestinations(d); setLabel(s.label); setNotes(s.notes); setChoice({ kind: 'existing', id: s.destination_id })
-      try { setPreview(await cmd.imageDataUrl(sid)) } catch { setPreview(null) }
-    } catch { setShot(null) }
+      try {
+        const p = await cmd.imageDataUrl(sid)
+        if (current()) setPreview(p)
+      } catch {
+        if (current()) setPreview(null)
+      }
+    } catch {
+      if (current()) setShot(null)
+    }
   }
 
-  useEffect(() => { setMsg(null); if (id == null) { setShot(null); return } void load(id) }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setMsg(null); if (id == null) { loadSeq.current++; setShot(null); return } void load(id) }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (id == null || !shot) return <div className="p-4 text-sm text-neutral-500">Select a screenshot to see details.</div>
 

@@ -19,6 +19,9 @@ pub fn import_folder(store: &Store, folder: &Path, progress: &mut dyn FnMut(usiz
     let default_id = store.default_destination()?.id;
     let total = candidates.len();
     let mut report = ImportReport { added: 0, skipped: 0 };
+    // One transaction: thousands of autocommit inserts would each fsync and hold the store lock
+    // for seconds; inside a transaction the whole import commits in milliseconds.
+    let tx = store.conn.unchecked_transaction()?;
     for (i, p) in candidates.iter().enumerate() {
         if tracked.contains(&paths::norm(&p.to_string_lossy())) {
             report.skipped += 1;
@@ -30,6 +33,7 @@ pub fn import_folder(store: &Store, folder: &Path, progress: &mut dyn FnMut(usiz
         }
         progress(i + 1, total);
     }
+    tx.commit()?;
     Ok(report)
 }
 

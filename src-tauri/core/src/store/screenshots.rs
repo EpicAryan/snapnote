@@ -111,6 +111,13 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// One query for startup reconciliation: (id, path, status) for every row.
+    pub fn all_rows_status(&self) -> Result<Vec<(i64, String, Status)>> {
+        let mut st = self.conn.prepare("SELECT id, path, status FROM screenshots")?;
+        let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, Status::parse(&r.get::<_, String>(2)?))))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     pub fn tracked_paths_in(&self, folder: &str) -> Result<HashSet<String>> {
         Ok(self
             .all_paths()?

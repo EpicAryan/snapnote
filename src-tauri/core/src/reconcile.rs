@@ -2,23 +2,35 @@ use crate::store::Store;
 use crate::{Result, Status};
 use std::path::Path;
 
-/// Flip rows whose file vanished to `missing`, restore `present` for files that came back.
-/// Returns how many rows were flipped to missing.
-pub fn mark_missing(store: &Store) -> Result<usize> {
+/// Decide which rows need their status flipped, from a snapshot of rows and an existence
+/// check. Pure: callers can run it without holding the store lock.
+pub fn plan(rows: &[(i64, String, Status)], exists: impl Fn(&Path) -> bool) -> Vec<(i64, Status)> {
+    rows.iter()
+        .filter_map(|(id, path, status)| match (exists(Path::new(path)), status) {
+            (false, Status::Present) => Some((*id, Status::Missing)),
+            (true, Status::Missing) => Some((*id, Status::Present)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Apply planned flips. Returns how many rows became missing.
+pub fn apply(store: &Store, changes: &[(i64, Status)]) -> Result<usize> {
     let mut flipped = 0;
-    for (id, path) in store.all_paths()? {
-        let exists = Path::new(&path).exists();
-        let current = store.get_screenshot(id)?.status;
-        match (exists, current) {
-            (false, Status::Present) => {
-                store.set_status(id, Status::Missing)?;
-                flipped += 1;
-            }
-            (true, Status::Missing) => store.set_status(id, Status::Present)?,
-            _ => {}
+    for (id, status) in changes {
+        store.set_status(*id, *status)?;
+        if *status == Status::Missing {
+            flipped += 1;
         }
     }
     Ok(flipped)
+}
+
+/// Snapshot, plan and apply in one go (holds the store for the whole walk; the app splits it).
+pub fn mark_missing(store: &Store) -> Result<usize> {
+    let rows = store.all_rows_status()?;
+    let changes = plan(&rows, |p| p.exists());
+    apply(store, &changes)
 }
 
 #[cfg(test)]
@@ -27,6 +39,18 @@ mod tests {
     use crate::store::Store;
     use crate::Status;
     use std::fs;
+
+    #[test]
+    fn plan_flips_only_rows_whose_existence_disagrees_with_their_status() {
+        let rows = vec![
+            (1, "a".to_string(), Status::Present),
+            (2, "b".to_string(), Status::Present),
+            (3, "c".to_string(), Status::Missing),
+            (4, "d".to_string(), Status::Missing),
+        ];
+        let changes = plan(&rows, |p| matches!(p.to_str(), Some("a") | Some("d")));
+        assert_eq!(changes, vec![(2, Status::Missing), (4, Status::Present)]);
+    }
 
     #[test]
     fn flips_missing_and_restores_present() {

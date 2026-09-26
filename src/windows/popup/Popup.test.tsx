@@ -94,6 +94,13 @@ describe('Popup', () => {
     await screen.findByText(/couldn't be moved/)
   })
 
+  it('a repeated popup:open for the same screenshot keeps unsaved typing', async () => {
+    const mock = await openFor(1)
+    fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'typed' } })
+    await act(async () => { mock.emit('popup:open', { id: 1 }) })
+    expect(screen.getByLabelText('Label')).toHaveValue('typed')
+  })
+
   it('a popup:open for an unknown id hides itself', async () => {
     const mock = createMockCommands()
     render(<CommandsProvider commands={mock.commands}><Popup /></CommandsProvider>)

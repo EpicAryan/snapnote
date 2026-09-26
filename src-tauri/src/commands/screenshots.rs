@@ -19,10 +19,17 @@ pub fn get_screenshot(state: State<'_, AppState>, id: i64) -> CmdResult<Screensh
 
 #[tauri::command(async)]
 pub fn save_metadata(app: AppHandle, state: State<'_, AppState>, id: i64, label: String, notes: String, choice: DestinationChoice) -> CmdResult<SaveResult> {
-    let result = {
+    let pending = {
         let store = state.store()?;
         let rename = store.get_settings()?.rename_on_label;
-        save::save_metadata(&store, id, &label, &notes, &choice, rename, &*files::default_mover())?
+        save::prepare(&store, id, &label, &notes, &choice, rename)?
+    };
+    // The disk move (with its retries) runs without the store lock so other commands and the
+    // hotkey keep working while a locked file is retried.
+    let outcome = save::execute(&pending, &*files::default_mover());
+    let result = {
+        let store = state.store()?;
+        save::commit(&store, &pending, outcome)?
     };
     app.emit("screenshot:updated", IdPayload { id })?;
     app.emit("settings:changed", Empty {})?;
@@ -31,10 +38,15 @@ pub fn save_metadata(app: AppHandle, state: State<'_, AppState>, id: i64, label:
 
 #[tauri::command(async)]
 pub fn retry_move(app: AppHandle, state: State<'_, AppState>, id: i64) -> CmdResult<SaveResult> {
-    let result = {
+    let pending = {
         let store = state.store()?;
         let rename = store.get_settings()?.rename_on_label;
-        save::retry_move(&store, id, rename, &*files::default_mover())?
+        save::prepare_retry(&store, id, rename)?
+    };
+    let outcome = save::execute(&pending, &*files::default_mover());
+    let result = {
+        let store = state.store()?;
+        save::commit(&store, &pending, outcome)?
     };
     app.emit("screenshot:updated", IdPayload { id })?;
     Ok(result)

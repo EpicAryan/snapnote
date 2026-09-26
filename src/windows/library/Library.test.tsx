@@ -80,6 +80,24 @@ describe('Library', () => {
     expect(screen.getByText('SETTINGS PANE')).toBeInTheDocument()
   })
 
+  it('pages through large libraries with Load more', async () => {
+    const many = Array.from({ length: 450 }, (_, i) => ({
+      path: `C:\\S\\s${i}.png`,
+      original_name: `s${i}.png`,
+      captured_at: `2026-01-01T${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}:00`,
+    }))
+    const mock = createMockCommands({ screenshots: many })
+    render(<CommandsProvider commands={mock.commands}><Library /></CommandsProvider>)
+    await waitFor(() => expect(screen.getAllByTestId('card')).toHaveLength(200))
+    expect(screen.getByText(/Showing 200/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
+    await waitFor(() => expect(screen.getAllByTestId('card')).toHaveLength(400))
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
+    await waitFor(() => expect(screen.getAllByTestId('card')).toHaveLength(450))
+    expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull()
+    expect(screen.getByText(/Showing 450 \(all\)/)).toBeInTheDocument()
+  })
+
   it('shows the empty state when nothing matches', async () => {
     await setup()
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'zzzz' } })

@@ -66,6 +66,17 @@ describe('SidePanel', () => {
     await waitFor(() => expect(mock.calls).toContainEqual(['deleteFile', 1]))
   })
 
+  it('ignores a slow response for a previously selected screenshot', async () => {
+    const mock = createMockCommands({ screenshots: [{ label: 'one' }, { label: 'two' }] })
+    const original = mock.commands.getScreenshot
+    mock.commands.getScreenshot = async (id) => { if (id === 1) await new Promise((r) => setTimeout(r, 80)); return original(id) }
+    const { rerender } = render(<CommandsProvider commands={mock.commands}><SidePanel id={1} onChanged={() => {}} /></CommandsProvider>)
+    rerender(<CommandsProvider commands={mock.commands}><SidePanel id={2} onChanged={() => {}} /></CommandsProvider>)
+    await screen.findByLabelText('Label')
+    await new Promise((r) => setTimeout(r, 150))
+    expect(screen.getByLabelText('Label')).toHaveValue('two')
+  })
+
   it('missing rows show the badge and hide Open/Reveal/Delete file', async () => {
     await setup(1, { screenshots: [{ status: 'missing' }] })
     expect(screen.getByText('Missing')).toBeInTheDocument()

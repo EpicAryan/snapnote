@@ -2,6 +2,7 @@ mod autostart;
 mod commands;
 mod error;
 mod hotkey;
+mod startup;
 mod state;
 mod tray;
 mod watch;
@@ -71,23 +72,35 @@ pub fn run() {
             autostart::apply(app.handle(), settings.autostart);
             watch::start(app.handle())?;
 
-            // Flag rows whose files vanished while we were not running. Off the main thread:
-            // it walks every tracked path.
+            // Flag rows whose files vanished while we were not running. Off the main thread, and
+            // the existence checks (thousands of paths, possibly on OneDrive) run without the
+            // store lock so commands keep working meanwhile.
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let state = handle.state::<AppState>();
-                let store = state.store();
-                if let Ok(store) = store {
-                    match snapnote_core::reconcile::mark_missing(&store) {
-                        Ok(n) if n > 0 => eprintln!("reconcile: {n} file(s) now missing"),
-                        Ok(_) => {}
-                        Err(e) => eprintln!("reconcile: {e}"),
+                let rows = state.store().and_then(|store| Ok(store.all_rows_status()?));
+                let rows = match rows {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("reconcile: {e}");
+                        return;
                     }
+                };
+                let changes = snapnote_core::reconcile::plan(&rows, |p| p.exists());
+                if changes.is_empty() {
+                    return;
+                }
+                let applied = state.store().and_then(|store| Ok(snapnote_core::reconcile::apply(&store, &changes)?));
+                match applied {
+                    Ok(n) if n > 0 => eprintln!("reconcile: {n} file(s) now missing"),
+                    Ok(_) => {}
+                    Err(e) => eprintln!("reconcile: {e}"),
                 }
             });
 
-            #[cfg(debug_assertions)]
-            windows::show_library(app.handle());
+            if startup::should_show_library(settings.first_run_done, cfg!(debug_assertions)) {
+                windows::show_library(app.handle());
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
