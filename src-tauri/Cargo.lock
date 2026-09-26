@@ -4173,7 +4173,7 @@ checksum = "f9395f0f0eee849a9b707b2f06bb92a6a422090e2123bb2ef8e87a0e61892a8e"
 
 [[package]]
 name = "snapnote"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64 0.22.1",
  "clipboard-win",
@@ -4191,6 +4191,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tempfile",
  "trash",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

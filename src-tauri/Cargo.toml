@@ -1,6 +1,6 @@
 [package]
 name = "snapnote"
-version = "0.2.0"
+version = "0.2.1"
 description = "Label, file, and find your Windows screenshots"
 authors = ["you"]
 edition = "2021"
@@ -30,6 +30,7 @@ trash = "5"
 [target.'cfg(windows)'.dependencies]
 known-folders = "1.4"
 clipboard-win = "5.4"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 
 [dev-dependencies]
 tempfile = "3"

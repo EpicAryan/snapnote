@@ -3,6 +3,41 @@ use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
 
+/// Whether the window is maximized right now, asked of Windows itself (see `win32`).
+fn maximized_now(w: &WebviewWindow) -> bool {
+    #[cfg(windows)]
+    {
+        w.hwnd().map(|h| crate::win32::is_zoomed(h.0 as _)).unwrap_or(false)
+    }
+    #[cfg(not(windows))]
+    {
+        w.is_maximized().unwrap_or(false)
+    }
+}
+
+fn maximized_now_raw(w: &tauri::Window) -> bool {
+    #[cfg(windows)]
+    {
+        w.hwnd().map(|h| crate::win32::is_zoomed(h.0 as _)).unwrap_or(false)
+    }
+    #[cfg(not(windows))]
+    {
+        w.is_maximized().unwrap_or(false)
+    }
+}
+
+fn show_maximized(w: &WebviewWindow) -> bool {
+    #[cfg(windows)]
+    {
+        w.hwnd().map(|h| crate::win32::show_maximized(h.0 as _)).unwrap_or(false)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = w;
+        false
+    }
+}
+
 pub const LIBRARY: &str = "library";
 pub const POPUP: &str = "popup";
 pub const TOAST: &str = "toast";
@@ -96,9 +131,17 @@ pub fn show_library(app: &AppHandle) {
     // A maximized placement restored while the window was hidden is applied now: maximizing a
     // hidden window makes tao show, maximize and re-hide it, which flashes on screen.
     let maximize = state.library_placement.lock().map(|mut p| std::mem::take(&mut p.maximize_on_show)).unwrap_or(false);
-    let _ = w.show();
     if maximize {
-        let _ = w.maximize();
+        // Straight into the maximized state: showing first and maximizing afterwards paints the
+        // window twice, which reads as a flash. tao's own visibility flag still needs `show()`,
+        // otherwise a later `hide()` is a no-op.
+        let shown = show_maximized(&w);
+        let _ = w.show();
+        if !shown {
+            let _ = w.maximize();
+        }
+    } else {
+        let _ = w.show();
     }
     let _ = w.unminimize();
     let _ = w.set_focus();
@@ -193,9 +236,17 @@ pub fn bounds_visible_on(monitors: &[(i32, i32, u32, u32)], b: &Bounds) -> bool 
     })
 }
 
+/// True for a "normal" rectangle that covers a whole monitor: that is a maximized rectangle
+/// that slipped through (earlier builds recorded one), and restoring it as the normal size
+/// makes the maximize button toggle between two identical placements.
+pub fn covers_a_monitor(monitors: &[(i32, i32, u32, u32)], b: &Bounds) -> bool {
+    monitors.iter().any(|&(_, _, mw, mh)| b.w >= mw && b.h + 48 >= mh)
+}
+
 /// Called on every move and resize of the library window.
 pub fn note_library_bounds(window: &tauri::Window) {
-    let (Ok(maximized), Ok(minimized), Ok(pos), Ok(size)) = (window.is_maximized(), window.is_minimized(), window.outer_position(), window.inner_size()) else {
+    let maximized = maximized_now_raw(window);
+    let (Ok(minimized), Ok(pos), Ok(size)) = (window.is_minimized(), window.outer_position(), window.inner_size()) else {
         return;
     };
     let Some(b) = normal_bounds(maximized, minimized, pos.x, pos.y, size.width, size.height) else { return };
@@ -209,7 +260,7 @@ pub fn note_library_bounds(window: &tauri::Window) {
 pub fn save_library_bounds(app: &AppHandle) {
     let Some(w) = win(app, LIBRARY) else { return };
     let state = app.state::<AppState>();
-    let maximized = w.is_maximized().unwrap_or(false);
+    let maximized = maximized_now(&w);
     let noted = state.library_placement.lock().ok().and_then(|p| p.normal.clone());
     let live = || {
         let (Ok(pos), Ok(size)) = (w.outer_position(), w.inner_size()) else { return None };
@@ -243,7 +294,7 @@ pub fn restore_library_bounds(app: &AppHandle) {
         .iter()
         .map(|m| (m.position().x, m.position().y, m.size().width, m.size().height))
         .collect();
-    let visible = bounds_visible_on(&monitors, &b);
+    let visible = bounds_visible_on(&monitors, &b) && !covers_a_monitor(&monitors, &b);
     // Moving the window fires Moved/Resized synchronously, and their handler takes this lock.
     if visible {
         let _ = w.set_position(PhysicalPosition::new(b.x, b.y));
@@ -299,6 +350,15 @@ mod tests {
         assert_eq!(placement_to_save(Some(normal.clone()), true), Some(Placement { x: 10, y: 20, w: 1100, h: 720, maximized: true }));
         assert_eq!(placement_to_save(Some(normal), false).map(|p| p.maximized), Some(false));
         assert_eq!(placement_to_save(None, true), None, "nothing known to restore to");
+    }
+
+    #[test]
+    fn a_normal_rectangle_that_covers_the_monitor_is_not_restored() {
+        let monitors = [(0, 0, 1920, 1080), (1920, 0, 1080, 1920)];
+        assert!(covers_a_monitor(&monitors, &Bounds { x: -8, y: -8, w: 1920, h: 1057 }), "what a maximized window reports");
+        assert!(!covers_a_monitor(&monitors, &Bounds { x: 100, y: 100, w: 1100, h: 720 }));
+        assert!(!covers_a_monitor(&monitors, &Bounds { x: 0, y: 0, w: 960, h: 1040 }), "snapped to half the screen");
+        assert!(!covers_a_monitor(&monitors, &Bounds { x: 1920, y: 0, w: 1100, h: 720 }), "wider than the portrait monitor but far from its height");
     }
 
     #[test]
