@@ -108,6 +108,16 @@ pub fn run() {
             commands::windows::open_popup_for,
             commands::windows::hide_popup,
             commands::windows::label_last_screenshot,
+            commands::screenshots::save_metadata,
+            commands::screenshots::retry_move,
+            commands::screenshots::get_thumbnail,
+            commands::screenshots::get_image_data_url,
+            commands::screenshots::open_file,
+            commands::screenshots::reveal_file,
+            commands::screenshots::remove_from_library,
+            commands::screenshots::delete_file,
+            commands::system::import_existing,
+            commands::system::clear_thumbnail_cache,
         ])
         .build(tauri::generate_context!())
         .expect("error while building snapnote")

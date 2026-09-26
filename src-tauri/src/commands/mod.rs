@@ -13,3 +13,9 @@ pub struct IdPayload {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Empty {}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Progress {
+    pub done: usize,
+    pub total: usize,
+}
