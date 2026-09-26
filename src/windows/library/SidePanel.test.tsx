@@ -77,6 +77,15 @@ describe('SidePanel', () => {
     expect(screen.getByLabelText('Label')).toHaveValue('two')
   })
 
+  it('has a close button that reports back to the parent', async () => {
+    const mock = createMockCommands()
+    const onClose = vi.fn()
+    render(<CommandsProvider commands={mock.commands}><SidePanel id={1} onChanged={() => {}} onClose={onClose} /></CommandsProvider>)
+    await screen.findByLabelText('Label')
+    fireEvent.click(screen.getByRole('button', { name: 'Close details' }))
+    expect(onClose).toHaveBeenCalled()
+  })
+
   it('missing rows show the badge and hide Open/Reveal/Delete file', async () => {
     await setup(1, { screenshots: [{ status: 'missing' }] })
     expect(screen.getByText('Missing')).toBeInTheDocument()

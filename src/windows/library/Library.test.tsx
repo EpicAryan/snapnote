@@ -23,6 +23,7 @@ describe('Library', () => {
     const first = screen.getAllByTestId('card')[0]
     expect(within(first).getByText('Embee')).toBeInTheDocument()
     expect(within(first).getByText('26 Sep 2026')).toBeInTheDocument()
+    expect(within(first).getByText('DB timeout while syncing')).toBeInTheDocument()
     expect(await within(first).findByRole('img')).toHaveAttribute('src', 'mock://thumb/1')
   })
 
@@ -96,6 +97,32 @@ describe('Library', () => {
     await waitFor(() => expect(screen.getAllByTestId('card')).toHaveLength(450))
     expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull()
     expect(screen.getByText(/Showing 450 \(all\)/)).toBeInTheDocument()
+  })
+
+  it('tells you how many results a search produced', async () => {
+    await setup()
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'sync' } })
+    await screen.findByText(/1 result for “sync”/)
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } })
+    await screen.findByText(/Showing 3 \(all\)/)
+  })
+
+  it('the side panel can be closed with its button or Escape', async () => {
+    const mock = createMockCommands()
+    render(
+      <CommandsProvider commands={mock.commands}>
+        <Library sidePanel={(id, _onChanged, onClose) => (id == null ? <div>PANEL CLOSED</div> : <button onClick={onClose}>close panel</button>)} />
+      </CommandsProvider>,
+    )
+    const cards = await screen.findAllByTestId('card')
+    fireEvent.click(cards[0])
+    expect(cards[0]).toHaveAttribute('aria-selected', 'true')
+    fireEvent.click(screen.getByRole('button', { name: 'close panel' }))
+    expect(screen.getByText('PANEL CLOSED')).toBeInTheDocument()
+    fireEvent.click(cards[1])
+    expect(cards[1]).toHaveAttribute('aria-selected', 'true')
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    expect(screen.getByText('PANEL CLOSED')).toBeInTheDocument()
   })
 
   it('shows the empty state when nothing matches', async () => {

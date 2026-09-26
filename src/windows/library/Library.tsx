@@ -8,7 +8,7 @@ import { useLibraryQuery } from './useLibraryQuery'
 
 export type LibraryView = 'grid' | 'settings'
 
-export function Library({ sidePanel, settings }: { sidePanel?: (id: number | null, onChanged: () => void) => ReactNode; settings?: ReactNode } = {}) {
+export function Library({ sidePanel, settings }: { sidePanel?: (id: number | null, onChanged: () => void, onClose: () => void) => ReactNode; settings?: ReactNode } = {}) {
   const cmd = useCommands()
   const lib = useLibraryQuery()
   const [destinations, setDestinations] = useState<Destination[]>([])
@@ -23,7 +23,9 @@ export function Library({ sidePanel, settings }: { sidePanel?: (id: number | nul
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
-      if (e.key === '/' && tag !== 'INPUT' && tag !== 'TEXTAREA') { e.preventDefault(); searchRef.current?.focus() }
+      const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+      if (e.key === '/' && !typing) { e.preventDefault(); searchRef.current?.focus() }
+      if (e.key === 'Escape' && !typing) setSelectedId(null)
     }
     document.addEventListener('keydown', h)
     return () => document.removeEventListener('keydown', h)
@@ -52,14 +54,18 @@ export function Library({ sidePanel, settings }: { sidePanel?: (id: number | nul
           <div className="flex min-h-0 flex-1">
             <div className="flex-1 overflow-auto">
               <Grid cards={lib.cards} selectedId={selectedId} onSelect={setSelectedId} onOpen={(id) => void cmd.openFile(id)} onDeleteRequest={setSelectedId} />
-              {lib.cards.length > 0 && (
+              {(lib.cards.length > 0 || lib.q.trim()) && (
                 <div className="flex items-center justify-center gap-3 p-3 text-xs text-neutral-400">
-                  <span>Showing {lib.cards.length}{lib.hasMore ? '' : ' (all)'}</span>
+                  <span>
+                    {lib.q.trim()
+                      ? `${lib.cards.length} result${lib.cards.length === 1 ? '' : 's'} for “${lib.q.trim()}”${lib.hasMore ? ' so far' : ''}`
+                      : `Showing ${lib.cards.length}${lib.hasMore ? '' : ' (all)'}`}
+                  </span>
                   {lib.hasMore && <button className="rounded bg-neutral-800 px-2 py-1 text-neutral-200" onClick={lib.loadMore}>Load more</button>}
                 </div>
               )}
             </div>
-            {sidePanel && <aside className="w-80 shrink-0 overflow-auto border-l border-neutral-800">{sidePanel(selectedId, () => void lib.reload())}</aside>}
+            {sidePanel && <aside className="w-80 shrink-0 overflow-auto border-l border-neutral-800">{sidePanel(selectedId, () => void lib.reload(), () => setSelectedId(null))}</aside>}
           </div>
         </>
       )}

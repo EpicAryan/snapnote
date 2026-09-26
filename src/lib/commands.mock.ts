@@ -95,6 +95,7 @@ export function createMockCommands(seed: MockSeed = {}): MockHandle {
     original_name: s.original_name,
     captured_at: s.captured_at,
     label: s.label,
+    notes: s.notes,
     destination_id: s.destination_id,
     destination_name: findDest(s.destination_id).name,
     status: s.status,

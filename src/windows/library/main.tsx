@@ -10,7 +10,7 @@ import { SettingsScreen } from './settings/SettingsScreen'
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <CommandsProvider commands={tauriCommands}>
-      <Library sidePanel={(id, onChanged) => <SidePanel id={id} onChanged={onChanged} />} settings={<SettingsScreen />} />
+      <Library sidePanel={(id, onChanged, onClose) => <SidePanel id={id} onChanged={onChanged} onClose={onClose} />} settings={<SettingsScreen />} />
     </CommandsProvider>
   </StrictMode>,
 )
